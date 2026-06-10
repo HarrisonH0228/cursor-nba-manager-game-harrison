@@ -6,6 +6,7 @@ from nba_api.stats.endpoints import commonplayerinfo, leaguedashplayerstats
 from nba_api.stats.static import teams as nba_teams
 
 import cache
+from ratings import apply_ratings
 
 load_dotenv()
 
@@ -46,6 +47,7 @@ def _player_record(row, team_lookup):
         "apg": row.get("AST"),
         "spg": row.get("STL"),
         "bpg": row.get("BLK"),
+        "gp": row.get("GP"),
         "age": row.get("AGE"),
     }
 
@@ -87,6 +89,8 @@ def refresh_cache():
 
         if not records:
             raise ValueError("No players with games played in API response")
+
+        records = apply_ratings(records)
 
         cache.save_cache(
             {

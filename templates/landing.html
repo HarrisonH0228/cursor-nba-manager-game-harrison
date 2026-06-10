@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="px-4 py-5 my-5 text-center">
+    <h1 class="display-4 fw-bold">NBA Manager</h1>
+    <p class="lead col-lg-8 mx-auto">
+        Act as the General Manager of an NBA team. Trade away stars for draft picks and youth,
+        or go all-in for proven talent — no job pressure, just your vision.
+    </p>
+    <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-4">
+        <form method="post" action="{{ url_for('start') }}">
+            <button type="submit" class="btn btn-primary btn-lg px-4 gap-3">Start Game</button>
+        </form>
+    </div>
+    <p class="text-muted mt-4 mb-0">You'll be assigned a random team and take over the front office.</p>
+</div>
+{% endblock %}

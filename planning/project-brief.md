@@ -33,6 +33,8 @@ This is for people who want to be able to act like an NBA GM in an arcade-like g
       "apg": 10.2,
       "spg": 1.8,
       "bpg": 0.6,
+      "gp": 72,
+      "overall": 98.4,
       "age": 30
     }
   ]
