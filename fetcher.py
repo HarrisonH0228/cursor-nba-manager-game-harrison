@@ -1,170 +1,115 @@
-import os
 import time
 from datetime import datetime, timezone
 
-import requests
 from dotenv import load_dotenv
+from nba_api.stats.endpoints import commonplayerinfo, leaguedashplayerstats
+from nba_api.stats.static import teams as nba_teams
 
 import cache
 
 load_dotenv()
 
-BASE_URL = "https://api.balldontlie.io"
-CURRENT_SEASON = 2025
-MAX_PLAYER_PAGES = 2
-RATE_LIMIT_DELAY = 12
+CURRENT_SEASON = 2026
+REQUEST_DELAY = 0.6
 
 
-def _get_api_key():
-    api_key = os.getenv("BALLDONTLIE_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "BALLDONTLIE_API_KEY is missing. Add it to your .env file."
-        )
-    return api_key
+def season_string(end_year: int) -> str:
+    return f"{end_year - 1}-{str(end_year)[2:]}"
 
 
-def _get(path, params=None):
-    response = requests.get(
-        f"{BASE_URL}{path}",
-        headers={"Authorization": _get_api_key()},
-        params=params,
-        timeout=30,
+def _team_name_by_id():
+    return {team["id"]: team["full_name"] for team in nba_teams.get_teams()}
+
+
+def _fetch_league_player_stats(season_end_year):
+    time.sleep(REQUEST_DELAY)
+    response = leaguedashplayerstats.LeagueDashPlayerStats(
+        season=season_string(season_end_year),
+        season_type_all_star="Regular Season",
+        per_mode_detailed="PerGame",
+        measure_type_detailed_defense="Base",
     )
-    response.raise_for_status()
-    return response.json()
+    return response.get_normalized_dict().get("LeagueDashPlayerStats", [])
 
 
-def fetch_players(search=None, per_page=25, team_ids=None, cursor=None):
-    """GET /nba/v1/players/active — player lookup and team rosters."""
-    params = [("per_page", per_page)]
-    if search:
-        params.append(("search", search))
-    if team_ids:
-        for team_id in team_ids:
-            params.append(("team_ids[]", team_id))
-    if cursor:
-        params.append(("cursor", cursor))
+def _player_record(row, team_lookup):
+    team_id = row.get("TEAM_ID")
+    team_name = team_lookup.get(team_id, row.get("TEAM_ABBREVIATION", "Free Agent"))
 
-    payload = _get("/nba/v1/players/active", params=params)
-    return payload.get("data", []), payload.get("meta", {})
-
-
-def fetch_player(player_id):
-    """GET /nba/v1/players/{id} — single player detail."""
-    return _get(f"/nba/v1/players/{player_id}")["data"]
-
-
-def fetch_teams():
-    """GET /nba/v1/teams — all NBA teams."""
-    pass
-
-
-def fetch_team(team_id):
-    """GET /nba/v1/teams/{id} — single team detail."""
-    pass
-
-
-def fetch_season_averages(season, player_id):
-    """GET /nba/v1/season_averages — PPG, RPG, APG, SPG, BPG."""
-    payload = _get(
-        "/nba/v1/season_averages",
-        params={"season": season, "player_id": player_id},
-    )
-    rows = payload.get("data", [])
-    return rows[0] if rows else None
-
-
-def _fetch_season_averages_bulk(player_ids, season):
-    if not player_ids:
-        return {}
-
-    params = [
-        ("season", season),
-        ("season_type", "regular"),
-        ("type", "base"),
-        ("per_page", 100),
-    ]
-    for player_id in player_ids:
-        params.append(("player_ids[]", player_id))
-
-    payload = _get("/nba/v1/season_averages/general", params=params)
-    stats_by_id = {}
-
-    for row in payload.get("data", []):
-        player = row.get("player") or {}
-        player_id = row.get("player_id") or player.get("id")
-        if player_id is None:
-            continue
-
-        if "stats" in row:
-            stats = row["stats"]
-        else:
-            stats = row
-
-        stats_by_id[player_id] = {
-            "pts": stats.get("pts"),
-            "reb": stats.get("reb"),
-            "ast": stats.get("ast"),
-        }
-
-    return stats_by_id
-
-
-def _player_record(player, stats):
-    team = player.get("team") or {}
     return {
-        "id": player["id"],
-        "name": f"{player['first_name']} {player['last_name']}",
-        "team": team.get("full_name", "Free Agent"),
-        "ppg": stats.get("pts"),
-        "rpg": stats.get("reb"),
-        "apg": stats.get("ast"),
+        "id": row["PLAYER_ID"],
+        "name": row["PLAYER_NAME"],
+        "team": team_name,
+        "team_id": team_id,
+        "ppg": row.get("PTS"),
+        "rpg": row.get("REB"),
+        "apg": row.get("AST"),
+        "spg": row.get("STL"),
+        "bpg": row.get("BLK"),
+        "age": row.get("AGE"),
     }
 
 
+def fetch_teams():
+    """All NBA teams from embedded static data (no HTTP)."""
+    return nba_teams.get_teams()
+
+
+def fetch_team(team_id):
+    """Single team by ID from embedded static data."""
+    return nba_teams.find_team_name_by_id(team_id)
+
+
+def fetch_player(player_id):
+    """Single player detail from stats.nba.com."""
+    time.sleep(REQUEST_DELAY)
+    response = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
+    rows = response.get_normalized_dict().get("CommonPlayerInfo", [])
+    return rows[0] if rows else None
+
+
 def refresh_cache():
-    """Orchestrator called by scheduler to refresh cached data."""
-    all_players = []
-    cursor = None
+    """Orchestrator called by scheduler to refresh cached data.
 
-    for page in range(MAX_PLAYER_PAGES):
-        players, meta = fetch_players(per_page=25, cursor=cursor)
-        all_players.extend(players)
-        cursor = meta.get("next_cursor")
-        if not cursor:
-            break
-        if page < MAX_PLAYER_PAGES - 1:
-            time.sleep(RATE_LIMIT_DELAY)
+    Returns True on success, False if refresh failed but stale cache was kept.
+    """
+    try:
+        rows = _fetch_league_player_stats(CURRENT_SEASON)
+        if not rows:
+            raise ValueError("nba_api returned no player stats")
 
-    player_ids = [player["id"] for player in all_players]
-    stats_by_id = {}
+        team_lookup = _team_name_by_id()
+        records = [
+            _player_record(row, team_lookup)
+            for row in rows
+            if (row.get("GP") or 0) > 0
+        ]
 
-    if player_ids:
-        time.sleep(RATE_LIMIT_DELAY)
-        stats_by_id = _fetch_season_averages_bulk(player_ids, CURRENT_SEASON)
+        if not records:
+            raise ValueError("No players with games played in API response")
 
-        missing_ids = [pid for pid in player_ids if pid not in stats_by_id]
-        for index, player_id in enumerate(missing_ids):
-            if index > 0:
-                time.sleep(RATE_LIMIT_DELAY)
-            averages = fetch_season_averages(CURRENT_SEASON, player_id)
-            if averages:
-                stats_by_id[player_id] = {
-                    "pts": averages.get("pts"),
-                    "reb": averages.get("reb"),
-                    "ast": averages.get("ast"),
-                }
+        cache.save_cache(
+            {
+                "last_updated": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "season": CURRENT_SEASON,
+                "source": "nba_api",
+                "players": records,
+            }
+        )
+        return True
+    except Exception:
+        existing = cache.load_cache()
+        if existing.get("players"):
+            return False
+        raise
 
-    records = [
-        _player_record(player, stats_by_id.get(player["id"], {}))
-        for player in all_players
-    ]
 
-    cache.save_cache(
-        {
-            "last_updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "season": CURRENT_SEASON,
-            "players": records,
-        }
-    )
+if __name__ == "__main__":
+    success = refresh_cache()
+    if success:
+        count = len(cache.get_players())
+        print(f"Cache refreshed: {count} players")
+    else:
+        print("Refresh failed; kept existing cache")

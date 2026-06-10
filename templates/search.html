@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 
+{% macro stat_cell(player, stat_key) %}
+{{ player[stat_key] if player[stat_key] is not none else '—' }}
+{% if player[stat_key] is not none and (sort == stat_key or player.id == selected_id) and player.ranks.get(stat_key) %}
+<span class="badge bg-secondary ms-1">#{{ player.ranks[stat_key] }}</span>
+{% endif %}
+{% endmacro %}
+
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <div>
@@ -15,9 +22,19 @@
 <div class="alert alert-success">Player data refreshed successfully.</div>
 {% endif %}
 
+{% if stale %}
+<div class="alert alert-warning">
+    Refresh failed. Showing the most recent cached data{% if last_updated %} from {{ last_updated }}{% endif %}.
+    Data may be outdated.
+</div>
+{% endif %}
+
 <form method="get" action="{{ url_for('search') }}" class="row g-2 mb-4">
     <input type="hidden" name="sort" value="{{ sort }}">
     <input type="hidden" name="order" value="{{ order }}">
+    {% if selected_id is not none %}
+    <input type="hidden" name="selected" value="{{ selected_id }}">
+    {% endif %}
     <div class="col-md-8">
         <input
             type="search"
@@ -32,6 +49,23 @@
     </div>
 </form>
 
+{% if selected_player %}
+<div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+    <div>
+        <strong>{{ selected_player.name }}</strong>
+        —
+        {%- set rank_parts = [] -%}
+        {%- for stat in stat_columns -%}
+        {%- if selected_ranks.get(stat) -%}
+        {%- set _ = rank_parts.append(stat_labels[stat] ~ ' #' ~ selected_ranks[stat]) -%}
+        {%- endif -%}
+        {%- endfor -%}
+        {{ rank_parts | join(' · ') }}
+    </div>
+    <a href="{{ make_search_url(selected=None) }}" class="btn btn-sm btn-outline-secondary">Clear selection</a>
+</div>
+{% endif %}
+
 {% if not last_updated and not players %}
 <div class="alert alert-warning">
     No player data yet. Click <strong>Refresh Data</strong> to load stats from the API.
@@ -43,44 +77,60 @@
         <thead>
             <tr>
                 <th>
-                    <a href="{{ url_for('search', q=q, sort='name', order=next_order('name', sort, order)) }}" class="text-decoration-none">
+                    <a href="{{ make_search_url(sort='name', order=next_order('name', sort, order)) }}" class="text-decoration-none">
                         Name{% if sort == 'name' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
                     </a>
                 </th>
                 <th>
-                    <a href="{{ url_for('search', q=q, sort='team', order=next_order('team', sort, order)) }}" class="text-decoration-none">
+                    <a href="{{ make_search_url(sort='team', order=next_order('team', sort, order)) }}" class="text-decoration-none">
                         Team{% if sort == 'team' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
                     </a>
                 </th>
                 <th>
-                    <a href="{{ url_for('search', q=q, sort='ppg', order=next_order('ppg', sort, order)) }}" class="text-decoration-none">
+                    <a href="{{ make_search_url(sort='ppg', order=next_order('ppg', sort, order)) }}" class="text-decoration-none">
                         PPG{% if sort == 'ppg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
                     </a>
                 </th>
                 <th>
-                    <a href="{{ url_for('search', q=q, sort='rpg', order=next_order('rpg', sort, order)) }}" class="text-decoration-none">
+                    <a href="{{ make_search_url(sort='rpg', order=next_order('rpg', sort, order)) }}" class="text-decoration-none">
                         RPG{% if sort == 'rpg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
                     </a>
                 </th>
                 <th>
-                    <a href="{{ url_for('search', q=q, sort='apg', order=next_order('apg', sort, order)) }}" class="text-decoration-none">
+                    <a href="{{ make_search_url(sort='apg', order=next_order('apg', sort, order)) }}" class="text-decoration-none">
                         APG{% if sort == 'apg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="{{ make_search_url(sort='spg', order=next_order('spg', sort, order)) }}" class="text-decoration-none">
+                        SPG{% if sort == 'spg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="{{ make_search_url(sort='bpg', order=next_order('bpg', sort, order)) }}" class="text-decoration-none">
+                        BPG{% if sort == 'bpg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
                     </a>
                 </th>
             </tr>
         </thead>
         <tbody>
             {% for player in players %}
-            <tr>
-                <td>{{ player.name }}</td>
+            <tr class="{% if player.id == selected_id %}table-primary{% endif %}">
+                <td>
+                    <a href="{{ make_search_url(selected=player.id) }}" class="text-decoration-none">
+                        {{ player.name }}
+                    </a>
+                </td>
                 <td>{{ player.team }}</td>
-                <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
-                <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
-                <td>{{ player.apg if player.apg is not none else '—' }}</td>
+                <td>{{ stat_cell(player, 'ppg') }}</td>
+                <td>{{ stat_cell(player, 'rpg') }}</td>
+                <td>{{ stat_cell(player, 'apg') }}</td>
+                <td>{{ stat_cell(player, 'spg') }}</td>
+                <td>{{ stat_cell(player, 'bpg') }}</td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="5" class="text-center text-muted py-4">
+                <td colspan="7" class="text-center text-muted py-4">
                     {% if q %}
                     No players match "{{ q }}".
                     {% else %}

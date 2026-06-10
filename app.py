@@ -12,7 +12,34 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
 
-SORT_COLUMNS = {"name", "team", "ppg", "rpg", "apg"}
+SORT_COLUMNS = {"name", "team", "ppg", "rpg", "apg", "spg", "bpg"}
+STAT_COLUMNS = ("ppg", "rpg", "apg", "spg", "bpg")
+STAT_LABELS = {
+    "ppg": "PPG",
+    "rpg": "RPG",
+    "apg": "APG",
+    "spg": "SPG",
+    "bpg": "BPG",
+}
+
+
+def _compute_stat_ranks(players):
+    ranks_by_id = {player["id"]: {} for player in players}
+
+    for stat in STAT_COLUMNS:
+        ranked = [player for player in players if player.get(stat) is not None]
+        ranked.sort(key=lambda player: player[stat], reverse=True)
+
+        rank = 0
+        prev_value = object()
+        for index, player in enumerate(ranked):
+            value = player[stat]
+            if value != prev_value:
+                rank = index + 1
+                prev_value = value
+            ranks_by_id[player["id"]][stat] = rank
+
+    return ranks_by_id
 
 
 def _sort_players(players, sort_key, order):
@@ -77,6 +104,7 @@ def search():
     query = request.args.get("q", "").strip()
     sort_key = request.args.get("sort", "name")
     order = request.args.get("order", "asc")
+    selected_raw = request.args.get("selected", "").strip()
 
     if sort_key not in SORT_COLUMNS:
         sort_key = "name"
@@ -84,8 +112,20 @@ def search():
         order = "asc"
 
     cache_data = cache.load_cache()
-    players = list(cache_data.get("players", []))
+    all_players = list(cache_data.get("players", []))
+    stat_ranks = _compute_stat_ranks(all_players)
+    players_by_id = {player["id"]: player for player in all_players}
 
+    selected_id = None
+    if selected_raw.isdigit():
+        candidate_id = int(selected_raw)
+        if candidate_id in players_by_id:
+            selected_id = candidate_id
+
+    selected_player = players_by_id.get(selected_id) if selected_id is not None else None
+    selected_ranks = stat_ranks.get(selected_id, {}) if selected_id is not None else {}
+
+    players = list(all_players)
     if query:
         needle = query.lower()
         players = [
@@ -95,6 +135,18 @@ def search():
         ]
 
     players = _sort_players(players, sort_key, order)
+    for player in players:
+        player["ranks"] = stat_ranks.get(player["id"], {})
+
+    def make_search_url(**overrides):
+        params = {"q": query, "sort": sort_key, "order": order}
+        active_selected = selected_id
+        if "selected" in overrides:
+            active_selected = overrides.pop("selected")
+        if active_selected is not None:
+            params["selected"] = active_selected
+        params.update(overrides)
+        return url_for("search", **params)
 
     return render_template(
         "search.html",
@@ -103,16 +155,29 @@ def search():
         q=query,
         sort=sort_key,
         order=order,
+        selected_id=selected_id,
+        selected_player=selected_player,
+        selected_ranks=selected_ranks,
+        stat_columns=STAT_COLUMNS,
+        stat_labels=STAT_LABELS,
         last_updated=cache_data.get("last_updated"),
         refreshed=request.args.get("refreshed") == "1",
+        stale=request.args.get("stale") == "1",
         next_order=_next_order,
+        make_search_url=make_search_url,
     )
 
 
 @app.route("/refresh")
 def refresh():
-    refresh_cache()
-    return redirect(url_for("search", refreshed=1))
+    try:
+        success = refresh_cache()
+    except Exception:
+        return redirect(url_for("search", stale=1))
+
+    if success:
+        return redirect(url_for("search", refreshed=1))
+    return redirect(url_for("search", stale=1))
 
 
 if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":

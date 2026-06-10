@@ -13,7 +13,7 @@ def start_scheduler(app):
         return _scheduler
 
     _scheduler = BackgroundScheduler()
-    _scheduler.add_job(refresh_cache, "interval", minutes=15)
+    _scheduler.add_job(refresh_cache, "interval", days=1)
     _scheduler.start()
 
     atexit.register(lambda: _scheduler.shutdown(wait=False))
