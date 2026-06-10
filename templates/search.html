@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+        <h1 class="mb-1">{{ page_title }}</h1>
+        {% if last_updated %}
+        <p class="text-muted mb-0">Last updated: {{ last_updated }}</p>
+        {% endif %}
+    </div>
+    <a href="{{ url_for('refresh') }}" class="btn btn-outline-primary">Refresh Data</a>
+</div>
+
+{% if refreshed %}
+<div class="alert alert-success">Player data refreshed successfully.</div>
+{% endif %}
+
+<form method="get" action="{{ url_for('search') }}" class="row g-2 mb-4">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="order" value="{{ order }}">
+    <div class="col-md-8">
+        <input
+            type="search"
+            name="q"
+            class="form-control"
+            placeholder="Search players by name"
+            value="{{ q }}"
+        >
+    </div>
+    <div class="col-md-4">
+        <button type="submit" class="btn btn-primary w-100">Search</button>
+    </div>
+</form>
+
+{% if not last_updated and not players %}
+<div class="alert alert-warning">
+    No player data yet. Click <strong>Refresh Data</strong> to load stats from the API.
+</div>
+{% endif %}
+
+<div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+        <thead>
+            <tr>
+                <th>
+                    <a href="{{ url_for('search', q=q, sort='name', order=next_order('name', sort, order)) }}" class="text-decoration-none">
+                        Name{% if sort == 'name' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="{{ url_for('search', q=q, sort='team', order=next_order('team', sort, order)) }}" class="text-decoration-none">
+                        Team{% if sort == 'team' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="{{ url_for('search', q=q, sort='ppg', order=next_order('ppg', sort, order)) }}" class="text-decoration-none">
+                        PPG{% if sort == 'ppg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="{{ url_for('search', q=q, sort='rpg', order=next_order('rpg', sort, order)) }}" class="text-decoration-none">
+                        RPG{% if sort == 'rpg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="{{ url_for('search', q=q, sort='apg', order=next_order('apg', sort, order)) }}" class="text-decoration-none">
+                        APG{% if sort == 'apg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                    </a>
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for player in players %}
+            <tr>
+                <td>{{ player.name }}</td>
+                <td>{{ player.team }}</td>
+                <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
+                <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
+                <td>{{ player.apg if player.apg is not none else '—' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" class="text-center text-muted py-4">
+                    {% if q %}
+                    No players match "{{ q }}".
+                    {% else %}
+                    No players to display.
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
