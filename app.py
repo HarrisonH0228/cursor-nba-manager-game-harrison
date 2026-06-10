@@ -5,7 +5,31 @@ from flask import Flask, flash, redirect, render_template, request, url_for
 
 import cache
 from fetcher import refresh_cache
-from game import clear_game, get_game, require_game, start_game
+from game import (
+    clear_game,
+    get_game,
+    load_session_season,
+    require_game,
+    save_session_season,
+    set_season_id,
+    start_game,
+)
+import season_store
+from season import (
+    advance_playoff_round,
+    enrich_game_for_display,
+    games_played_count,
+    init_season,
+    regular_season_complete,
+    schedule_games,
+    seed_playoffs,
+    sim_day,
+    sim_rest_of_season,
+    sim_to_trade_deadline,
+    sim_week,
+    simulate_all_playoffs,
+    standings_table,
+)
 from ratings import (
     STAT_COLUMNS,
     STAT_LABELS,
@@ -395,6 +419,235 @@ def search():
         make_search_url=make_search_url,
         user_team_id=game["team_id"] if game else None,
     )
+
+
+def _season_context():
+    cache_data, all_players = _load_players()
+    lookup = {player["id"]: player for player in all_players}
+    season_id, season_data = load_session_season()
+    return cache_data, all_players, lookup, season_id, season_data
+
+
+def _save_season(season_id, season_data):
+    save_session_season(season_id, season_data)
+
+
+def _render_season(season_id, season_data, lookup, game, page="hub", schedule_day=None):
+    east_standings = standings_table(season_data, conference="East") if season_data else []
+    west_standings = standings_table(season_data, conference="West") if season_data else []
+    schedule = []
+    if season_data and page == "schedule":
+        day_filter = schedule_day
+        if day_filter is None:
+            day_filter = season_data.get("current_day", 1)
+        schedule = [
+            enrich_game_for_display(game, season_data)
+            for game in schedule_games(season_data, day=day_filter)
+        ]
+
+    return render_template(
+        "season.html",
+        page_title="Season",
+        page=page,
+        season=season_data,
+        season_id=season_id,
+        east_standings=east_standings,
+        west_standings=west_standings,
+        user_team_id=game["team_id"],
+        schedule=schedule,
+        schedule_day=schedule_day or (season_data.get("current_day", 1) if season_data else 1),
+        games_played=games_played_count(season_data) if season_data else 0,
+        regular_complete=regular_season_complete(season_data) if season_data else False,
+    )
+
+
+@app.route("/season")
+def season_hub():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    return _render_season(season_id, season_data, lookup, game, page="hub")
+
+
+@app.route("/season/start", methods=["POST"])
+def season_start():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    cache_data, all_players, lookup, season_id, season_data = _season_context()
+    if season_data is not None:
+        flash("Season already in progress.")
+        return redirect(url_for("season_hub"))
+
+    season_id = season_store.create_season_id()
+    season_data = init_season(all_players, season_year=cache_data.get("season") or 2026)
+    set_season_id(season_id)
+    _save_season(season_id, season_data)
+    flash("Season started.")
+    return redirect(url_for("season_hub"))
+
+
+@app.route("/season/sim/season", methods=["POST"])
+def season_sim_full():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    _, all_players, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    count = sim_rest_of_season(season_data, lookup)
+    _save_season(season_id, season_data)
+    flash(f"Simulated {count} games. Regular season complete.")
+    return redirect(url_for("season_hub"))
+
+
+@app.route("/season/schedule")
+def season_schedule():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    day_raw = request.args.get("day", "").strip()
+    schedule_day = season_data.get("current_day", 1)
+    if day_raw.isdigit():
+        schedule_day = int(day_raw)
+
+    return _render_season(
+        season_id,
+        season_data,
+        lookup,
+        game,
+        page="schedule",
+        schedule_day=schedule_day,
+    )
+
+
+@app.route("/season/sim/day", methods=["POST"])
+def season_sim_day():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    count = sim_day(season_data, lookup)
+    _save_season(season_id, season_data)
+    flash(f"Simulated day {season_data.get('current_day', 1) - 1}: {count} games.")
+    return redirect(url_for("season_hub"))
+
+
+@app.route("/season/sim/week", methods=["POST"])
+def season_sim_week():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    count = sim_week(season_data, lookup)
+    _save_season(season_id, season_data)
+    flash(f"Simulated one week: {count} games.")
+    return redirect(url_for("season_hub"))
+
+
+@app.route("/season/sim/trade-deadline", methods=["POST"])
+def season_sim_trade_deadline():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    count = sim_to_trade_deadline(season_data, lookup)
+    _save_season(season_id, season_data)
+    flash(f"Simulated to trade deadline (~55 GP): {count} games.")
+    return redirect(url_for("season_hub"))
+
+
+@app.route("/season/playoffs", methods=["GET", "POST"])
+def season_playoffs():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    if request.method == "POST" and season_data.get("playoffs") is None:
+        if not regular_season_complete(season_data):
+            sim_rest_of_season(season_data, lookup)
+        seed_playoffs(season_data, lookup)
+        _save_season(season_id, season_data)
+        flash("Playoffs seeded.")
+        return redirect(url_for("season_playoffs"))
+
+    east_standings = standings_table(season_data, conference="East")
+    west_standings = standings_table(season_data, conference="West")
+    return render_template(
+        "season.html",
+        page_title="Playoffs",
+        page="playoffs",
+        season=season_data,
+        season_id=season_id,
+        east_standings=east_standings,
+        west_standings=west_standings,
+        user_team_id=game["team_id"],
+        schedule=[],
+        schedule_day=season_data.get("current_day", 1),
+        games_played=games_played_count(season_data),
+        regular_complete=regular_season_complete(season_data),
+    )
+
+
+@app.route("/season/sim/playoffs", methods=["POST"])
+def season_sim_playoffs():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    sim_mode = request.form.get("mode", "round")
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None or season_data.get("playoffs") is None:
+        flash("Start playoffs first.")
+        return redirect(url_for("season_playoffs"))
+
+    if sim_mode == "all":
+        count = simulate_all_playoffs(season_data, lookup)
+        message = "Playoffs complete."
+        if season_data.get("playoffs", {}).get("champion_name"):
+            message = f"Champion: {season_data['playoffs']['champion_name']}"
+        flash(message)
+    else:
+        count = advance_playoff_round(season_data, lookup)
+        flash(f"Simulated playoff round: {count} series finished.")
+
+    _save_season(season_id, season_data)
+    return redirect(url_for("season_playoffs"))
 
 
 @app.route("/refresh")

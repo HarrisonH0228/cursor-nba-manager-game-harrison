@@ -3,10 +3,12 @@ import random
 from flask import redirect, session, url_for
 
 from fetcher import fetch_teams
+import season_store
 
 SESSION_GAME_STARTED = "game_started"
 SESSION_TEAM_ID = "team_id"
 SESSION_TEAM_NAME = "team_name"
+SESSION_SEASON_ID = "season_id"
 
 
 def get_game(current_session=None):
@@ -21,6 +23,28 @@ def get_game(current_session=None):
     }
 
 
+def get_season_id(current_session=None):
+    current_session = current_session if current_session is not None else session
+    return current_session.get(SESSION_SEASON_ID)
+
+
+def set_season_id(season_id, current_session=None):
+    current_session = current_session if current_session is not None else session
+    current_session[SESSION_SEASON_ID] = season_id
+
+
+def load_session_season(current_session=None):
+    season_id = get_season_id(current_session)
+    if not season_id:
+        return None, None
+    return season_id, season_store.load_season(season_id)
+
+
+def save_session_season(season_id, season_data, current_session=None):
+    season_store.save_season(season_id, season_data)
+    set_season_id(season_id, current_session)
+
+
 def start_game(current_session=None):
     current_session = current_session if current_session is not None else session
     team = random.choice(fetch_teams())
@@ -32,6 +56,9 @@ def start_game(current_session=None):
 
 def clear_game(current_session=None):
     current_session = current_session if current_session is not None else session
+    season_id = current_session.pop(SESSION_SEASON_ID, None)
+    if season_id:
+        season_store.delete_season(season_id)
     current_session.pop(SESSION_GAME_STARTED, None)
     current_session.pop(SESSION_TEAM_ID, None)
     current_session.pop(SESSION_TEAM_NAME, None)

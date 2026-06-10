@@ -6,3 +6,6 @@ venv/
 .DS_Store
 data/*
 !data/cache.json
+!data/seasons/
+data/seasons/*
+!data/seasons/.gitkeep
