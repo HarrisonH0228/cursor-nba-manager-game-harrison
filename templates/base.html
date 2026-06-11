@@ -75,11 +75,19 @@
 
 <!-- ── Main ── -->
 <main class="container flex-grow-1 py-4">
-  {% with messages = get_flashed_messages() %}
+  {% with messages = get_flashed_messages(with_categories=True) %}
   {% if messages %}
   <div class="mb-4" style="display:flex;flex-direction:column;gap:.5rem;">
-    {% for message in messages %}
+    {% for category, message in messages %}
+    {% if category in ['error', 'danger'] %}
+    <div class="alert-nba alert-nba-danger">{{ message }}</div>
+    {% elif category == 'warning' %}
+    <div class="alert-nba alert-nba-warning">{{ message }}</div>
+    {% elif category == 'info' %}
+    <div class="alert-nba alert-nba-info">{{ message }}</div>
+    {% else %}
     <div class="alert-nba alert-nba-success">{{ message }}</div>
+    {% endif %}
     {% endfor %}
   </div>
   {% endif %}

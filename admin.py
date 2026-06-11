@@ -7,6 +7,8 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, u
 
 from attributes import (
     ATTRIBUTE_KEYS,
+    MAX_ATTR,
+    MIN_ATTR,
     POTENTIAL_MAX,
     POTENTIAL_MIN,
     _assign_peak_attributes,
@@ -73,6 +75,129 @@ def _parse_float(raw):
         return None
 
 
+def _parse_int(raw, default=None):
+    if raw is None:
+        return default
+    text = str(raw).strip()
+    if text == "":
+        return default
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
+AGE_MIN = 18
+AGE_MAX = 45
+OVERALL_MIN = 25
+OVERALL_MAX = 99
+
+
+def _validate_player_form(form, *, is_create=False, existing_player=None, valid_team_ids=None):
+    errors = []
+    parsed = {}
+
+    age_raw = form.get("age", "").strip()
+    if is_create or age_raw:
+        age = _parse_int(age_raw, default=20 if is_create else None)
+        if age is None:
+            errors.append("Age must be a whole number.")
+        elif not AGE_MIN <= age <= AGE_MAX:
+            errors.append(f"Age must be between {AGE_MIN} and {AGE_MAX}.")
+        else:
+            parsed["age"] = age
+
+    if is_create:
+        overall_raw = form.get("overall", "60").strip()
+        overall = _parse_int(overall_raw)
+        if overall is None:
+            errors.append("Overall must be a whole number.")
+        elif not OVERALL_MIN <= overall <= OVERALL_MAX:
+            errors.append(f"Overall must be between {OVERALL_MIN} and {OVERALL_MAX}.")
+        else:
+            parsed["overall"] = overall
+
+    potential_raw = form.get("potential", "").strip()
+    if potential_raw:
+        potential = _parse_int(potential_raw)
+        if potential is None:
+            errors.append("Potential must be a whole number.")
+        elif not POTENTIAL_MIN <= potential <= POTENTIAL_MAX:
+            errors.append(f"Potential must be between {POTENTIAL_MIN} and {POTENTIAL_MAX}.")
+        else:
+            parsed["potential"] = potential
+
+    peak_raw = form.get("peak_age", "").strip()
+    if peak_raw:
+        peak_age = _parse_int(peak_raw)
+        if peak_age is None:
+            errors.append("Peak age must be a whole number.")
+        else:
+            parsed["peak_age"] = peak_age
+
+    retirement_raw = form.get("retirement_age", "").strip()
+    if retirement_raw:
+        retirement_age = _parse_int(retirement_raw)
+        if retirement_age is None:
+            errors.append("Retirement age must be a whole number.")
+        else:
+            parsed["retirement_age"] = retirement_age
+
+    age_for_check = parsed.get("age")
+    if age_for_check is None and existing_player is not None:
+        age_for_check = existing_player.get("age") or 25
+    peak_for_check = parsed.get("peak_age")
+    if peak_for_check is None and existing_player is not None:
+        peak_for_check = existing_player.get("peak_age")
+    if "retirement_age" in parsed:
+        if parsed["retirement_age"] <= age_for_check:
+            errors.append("Retirement age must be greater than current age.")
+        elif peak_for_check and parsed["retirement_age"] <= peak_for_check:
+            errors.append("Retirement age must be greater than peak age.")
+
+    dev_raw = form.get("development_rate", "").strip()
+    if dev_raw:
+        dev_val = _parse_float(dev_raw)
+        if dev_val is None:
+            errors.append("Development rate must be a number.")
+        elif not 0.5 <= dev_val <= 2.0:
+            errors.append("Development rate must be between 0.5 and 2.0.")
+        else:
+            parsed["development_rate"] = round(dev_val, 3)
+
+    ppg_raw = form.get("ppg", "").strip()
+    if ppg_raw:
+        ppg_val = _parse_float(ppg_raw)
+        if ppg_val is None:
+            errors.append("PPG must be a number.")
+        else:
+            parsed["ppg"] = round(ppg_val, 1)
+            parsed["manual_ppg"] = True
+
+    parsed["attributes"] = {}
+    for key in ATTRIBUTE_KEYS:
+        raw = form.get(f"attr_{key}", "").strip()
+        if raw:
+            attr_val = _parse_int(raw)
+            if attr_val is None:
+                errors.append(f"{key.title()} must be a whole number.")
+            else:
+                parsed["attributes"][key] = max(MIN_ATTR, min(MAX_ATTR, attr_val))
+
+    if is_create:
+        parsed["destination"] = form.get("destination", "draft")
+        team_id_raw = form.get("team_id", "").strip()
+        if parsed["destination"] == "team":
+            team_id = _parse_int(team_id_raw)
+            if team_id is None or (valid_team_ids is not None and team_id not in valid_team_ids):
+                errors.append("Select a valid team when assigning to a roster.")
+            else:
+                parsed["team_id"] = team_id
+
+    parsed["name"] = form.get("name", "").strip() or "Custom Player"
+    return errors, parsed
+
+
 @admin_bp.route("/")
 def admin_index():
     game = get_game()
@@ -112,62 +237,69 @@ def admin_edit_player(player_id):
         return redirect_response
     player = lookup.get(player_id)
     if not player:
-        flash("Player not found.")
+        flash("Player not found.", "error")
         return redirect(url_for("admin.admin_players"))
 
     if request.method == "POST":
-        raw_name = request.form.get("name", player.get("name", "")).strip()
+        errors, parsed = _validate_player_form(
+            request.form,
+            is_create=False,
+            existing_player=player,
+        )
+        if errors:
+            for message in errors:
+                flash(message, "error")
+            years_to_peak = None
+            peak_age = parsed.get("peak_age", player.get("peak_age"))
+            age = parsed.get("age", player.get("age"))
+            if peak_age is not None and age is not None:
+                years_to_peak = max(0, peak_age - age)
+            return render_template(
+                "admin/edit_player.html",
+                page_title=f"Edit {player.get('name', player_id)}",
+                player=player,
+                attribute_keys=ATTRIBUTE_KEYS,
+                years_to_peak=years_to_peak,
+                form_data=request.form,
+            )
+
+        raw_name = parsed["name"]
         player["name"] = ensure_unique_name(raw_name, _existing_names(season_data, exclude_player_id=player_id))
 
-        if request.form.get("age", "").isdigit():
-            player["age"] = int(request.form["age"])
+        if "age" in parsed:
+            player["age"] = parsed["age"]
 
         positions_raw = request.form.get("positions", "")
         if positions_raw:
             player["positions"] = [pos.strip() for pos in positions_raw.split("/") if pos.strip()]
             ensure_positions(player)
 
-        potential_raw = request.form.get("potential", "").strip()
-        if potential_raw.isdigit():
-            player["potential"] = max(POTENTIAL_MIN, min(POTENTIAL_MAX, int(potential_raw)))
+        if "potential" in parsed:
+            player["potential"] = parsed["potential"]
             player.pop("peak_attributes", None)
             _assign_peak_attributes(player, random.Random())
 
-        if request.form.get("peak_age", "").isdigit():
-            player["peak_age"] = int(request.form["peak_age"])
-        if request.form.get("retirement_age", "").isdigit():
-            retirement_age = int(request.form["retirement_age"])
-            age = player.get("age") or 25
-            if retirement_age <= age:
-                flash("Retirement age must be greater than current age.")
-                return redirect(url_for("admin.admin_edit_player", player_id=player_id))
-            if player.get("peak_age") and retirement_age <= player["peak_age"]:
-                flash("Retirement age must be greater than peak age.")
-                return redirect(url_for("admin.admin_edit_player", player_id=player_id))
-            player["retirement_age"] = retirement_age
+        if "peak_age" in parsed:
+            player["peak_age"] = parsed["peak_age"]
+        if "retirement_age" in parsed:
+            player["retirement_age"] = parsed["retirement_age"]
 
-        dev_raw = request.form.get("development_rate", "").strip()
-        dev_val = _parse_float(dev_raw)
-        if dev_val is not None:
-            player["development_rate"] = round(max(0.5, min(2.0, dev_val)), 3)
+        if "development_rate" in parsed:
+            player["development_rate"] = parsed["development_rate"]
 
-        ppg_raw = request.form.get("ppg", "").strip()
-        ppg_val = _parse_float(ppg_raw)
-        manual_ppg = ppg_val is not None and ppg_raw != ""
+        manual_ppg = parsed.get("manual_ppg", False)
 
         base = player.setdefault("base_attributes", player.get("attributes", {}))
-        for key in ATTRIBUTE_KEYS:
-            raw = request.form.get(f"attr_{key}", "").strip()
-            if raw.isdigit():
-                base[key] = int(raw)
+        for key, value in parsed.get("attributes", {}).items():
+            base[key] = value
 
         if manual_ppg:
             player["stats_source"] = "manual"
-            player["ppg"] = round(ppg_val, 1)
+            player["ppg"] = parsed["ppg"]
             refresh_player_from_attributes(player)
-            player["ppg"] = round(ppg_val, 1)
+            player["ppg"] = parsed["ppg"]
         else:
-            if player.get("stats_source") == "manual":
+            if player.get("stats_source") == "manual" and request.form.get("ppg", "").strip() == "":
                 player["stats_source"] = "generated"
             refresh_player_from_attributes(player)
 
@@ -205,12 +337,26 @@ def admin_create_player():
     teams.sort(key=lambda item: item["team_name"])
 
     if request.method == "POST":
-        name = request.form.get("name", "").strip() or "Custom Player"
-        name = ensure_unique_name(name, _existing_names(season_data))
-        overall_raw = request.form.get("overall", "60").strip()
-        overall = int(overall_raw) if overall_raw.isdigit() else 60
-        destination = request.form.get("destination", "draft")
-        team_id_raw = request.form.get("team_id", "").strip()
+        valid_team_ids = {int(team_id) for team_id in season_data.get("standings", {})}
+        errors, parsed = _validate_player_form(
+            request.form,
+            is_create=True,
+            valid_team_ids=valid_team_ids,
+        )
+        if errors:
+            for message in errors:
+                flash(message, "error")
+            return render_template(
+                "admin/create_player.html",
+                page_title="Create Player",
+                teams=teams,
+                attribute_keys=ATTRIBUTE_KEYS,
+                form_data=request.form,
+            )
+
+        name = ensure_unique_name(parsed["name"], _existing_names(season_data))
+        overall = parsed["overall"]
+        destination = parsed.get("destination", "draft")
 
         profile = generate_rookie_profile(overall)
         player_id = allocate_player_id(season_data)
@@ -221,44 +367,39 @@ def admin_create_player():
             "team": None,
             "overall": overall,
             "scout_grade": overall,
-            "age": int(request.form.get("age", "20") or 20),
+            "age": parsed["age"],
             "gp": 0,
             "is_rookie": True,
             "positions": profile["positions"],
             "stats_source": "generated",
         }
-        for key in ATTRIBUTE_KEYS:
-            raw = request.form.get(f"attr_{key}", "").strip()
-            if raw.isdigit():
-                profile["attributes"][key] = int(raw)
+        for key, value in parsed.get("attributes", {}).items():
+            profile["attributes"][key] = value
         init_rookie_career_profile(player, profile["attributes"], scout_grade=overall)
 
-        potential_raw = request.form.get("potential", "").strip()
-        if potential_raw.isdigit():
-            player["potential"] = max(POTENTIAL_MIN, min(POTENTIAL_MAX, int(potential_raw)))
+        if "potential" in parsed:
+            player["potential"] = parsed["potential"]
             player.pop("peak_attributes", None)
             _assign_peak_attributes(player, random.Random())
-        if request.form.get("peak_age", "").isdigit():
-            player["peak_age"] = int(request.form["peak_age"])
-        if request.form.get("retirement_age", "").isdigit():
-            player["retirement_age"] = int(request.form["retirement_age"])
-        dev_val = _parse_float(request.form.get("development_rate", "").strip())
-        if dev_val is not None:
-            player["development_rate"] = round(max(0.5, min(2.0, dev_val)), 3)
+        if "peak_age" in parsed:
+            player["peak_age"] = parsed["peak_age"]
+        if "retirement_age" in parsed:
+            player["retirement_age"] = parsed["retirement_age"]
+        if "development_rate" in parsed:
+            player["development_rate"] = parsed["development_rate"]
 
-        ppg_val = _parse_float(request.form.get("ppg", "").strip())
-        if ppg_val is not None and request.form.get("ppg", "").strip():
+        if parsed.get("manual_ppg"):
             player["stats_source"] = "manual"
-            player["ppg"] = round(ppg_val, 1)
+            player["ppg"] = parsed["ppg"]
 
         refresh_player_from_attributes(player)
-        if player.get("stats_source") == "manual" and ppg_val is not None:
-            player["ppg"] = round(ppg_val, 1)
+        if parsed.get("manual_ppg"):
+            player["ppg"] = parsed["ppg"]
         player["overall"] = compute_intrinsic_overall(player)
         season_data["players"][str(player_id)] = player
 
-        if destination == "team" and team_id_raw.isdigit():
-            team_id = int(team_id_raw)
+        if destination == "team" and "team_id" in parsed:
+            team_id = parsed["team_id"]
             player["team_id"] = team_id
             player["team"] = team_name(season_data, team_id)
             roster = season_data["rosters"].setdefault(str(team_id), [])

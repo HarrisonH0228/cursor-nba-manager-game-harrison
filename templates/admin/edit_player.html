@@ -4,20 +4,20 @@
 <p class="text-muted-nba">Age {{ player.age }} · Career arc: {{ player.career_arc or '—' }}{% if years_to_peak is not none %} · {{ years_to_peak }} yrs to peak{% endif %}</p>
 <form method="post" class="card-nba p-4">
   <h3 style="font-size:1rem;margin-bottom:1rem;">Identity</h3>
-  <div class="mb-3"><label>Name</label><input class="form-control" name="name" value="{{ player.name }}"></div>
-  <div class="mb-3"><label>Age</label><input class="form-control" name="age" value="{{ player.age or 25 }}"></div>
-  <div class="mb-3"><label>Positions (PG/SG)</label><input class="form-control" name="positions" value="{{ player.positions|join('/') if player.positions else '' }}"></div>
+  <div class="mb-3"><label>Name</label><input class="form-control" name="name" value="{{ form_data.get('name', player.name) if form_data else player.name }}"></div>
+  <div class="mb-3"><label>Age</label><input class="form-control" name="age" value="{{ form_data.get('age', player.age or 25) if form_data else (player.age or 25) }}"></div>
+  <div class="mb-3"><label>Positions (PG/SG)</label><input class="form-control" name="positions" value="{{ form_data.get('positions', player.positions|join('/') if player.positions else '') if form_data else (player.positions|join('/') if player.positions else '') }}"></div>
 
   <h3 style="font-size:1rem;margin:1.5rem 0 1rem;">Career</h3>
-  <div class="mb-3"><label>Potential (40–99)</label><input class="form-control" name="potential" value="{{ player.potential or '' }}"></div>
-  <div class="mb-3"><label>PPG (manual override)</label><input class="form-control" name="ppg" step="0.1" value="{{ player.ppg|stat1 if player.ppg is not none else '' }}"><small class="text-muted-nba">Leave blank to derive from attributes.</small></div>
-  <div class="mb-3"><label>Peak age</label><input class="form-control" name="peak_age" value="{{ player.peak_age or '' }}"><small class="text-muted-nba">Age when this player hits their prime.</small></div>
-  <div class="mb-3"><label>Retirement age</label><input class="form-control" name="retirement_age" value="{{ player.retirement_age or '' }}"><small class="text-muted-nba">Must be greater than current age.</small></div>
-  <div class="mb-3"><label>Development rate (0.5–2.0)</label><input class="form-control" name="development_rate" step="0.01" value="{{ player.development_rate or '' }}"><small class="text-muted-nba">1.0 = normal. 1.5 = fast riser. 0.7 = slow developer.</small></div>
+  <div class="mb-3"><label>Potential (40–99)</label><input class="form-control" name="potential" value="{{ form_data.get('potential', player.potential or '') if form_data else (player.potential or '') }}"></div>
+  <div class="mb-3"><label>PPG (manual override)</label><input class="form-control" name="ppg" step="0.1" value="{{ form_data.get('ppg', player.ppg|stat1 if player.ppg is not none else '') if form_data else (player.ppg|stat1 if player.ppg is not none else '') }}"><small class="text-muted-nba">Leave blank to derive from attributes.</small></div>
+  <div class="mb-3"><label>Peak age</label><input class="form-control" name="peak_age" value="{{ form_data.get('peak_age', player.peak_age or '') if form_data else (player.peak_age or '') }}"><small class="text-muted-nba">Age when this player hits their prime.</small></div>
+  <div class="mb-3"><label>Retirement age</label><input class="form-control" name="retirement_age" value="{{ form_data.get('retirement_age', player.retirement_age or '') if form_data else (player.retirement_age or '') }}"><small class="text-muted-nba">Must be greater than current age.</small></div>
+  <div class="mb-3"><label>Development rate (0.5–2.0)</label><input class="form-control" name="development_rate" step="0.01" value="{{ form_data.get('development_rate', player.development_rate or '') if form_data else (player.development_rate or '') }}"><small class="text-muted-nba">1.0 = normal. 1.5 = fast riser. 0.7 = slow developer.</small></div>
 
   <h3 style="font-size:1rem;margin:1.5rem 0 1rem;">Attributes</h3>
   {% for key in attribute_keys %}
-  <div class="mb-2"><label>{{ key|title }}</label><input class="form-control" name="attr_{{ key }}" value="{{ player.attributes[key] if player.attributes else '' }}"></div>
+  <div class="mb-2"><label>{{ key|title }}</label><input class="form-control" name="attr_{{ key }}" value="{{ form_data.get('attr_' ~ key, player.attributes[key] if player.attributes else '') if form_data else (player.attributes[key] if player.attributes else '') }}"></div>
   {% endfor %}
   <button type="submit" class="btn-nba-primary mt-3">Save</button>
 </form>

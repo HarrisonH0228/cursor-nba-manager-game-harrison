@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="choose-team-header mb-4">
+  <h1 class="display-hero mb-2" style="font-size:2rem;">Choose Your Team</h1>
+  <p class="text-muted-nba mb-3" style="max-width:520px;line-height:1.6;">
+    Pick any of the 30 NBA franchises and take over as General Manager.
+  </p>
+  <div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;">
+    <a href="{{ url_for('index') }}" class="btn-nba-secondary btn-nba-sm">Back</a>
+    <form method="post" action="{{ url_for('start') }}">
+      <button type="submit" class="btn-nba-secondary btn-nba-sm">Roll instead</button>
+    </form>
+  </div>
+</div>
+
+<div class="team-picker-grid">
+  {% for team in teams %}
+  <form method="post" action="{{ url_for('start_pick') }}" class="team-picker-form">
+    <input type="hidden" name="team_id" value="{{ team.id }}">
+    <button type="submit" class="team-picker-card" aria-label="Select {{ team.full_name }}">
+      <img
+        class="team-logo-lg"
+        data-team-logo="{{ team.full_name }}"
+        alt="{{ team.full_name }}"
+        onerror="this.style.display='none'"
+      >
+      <span class="team-picker-name">{{ team.full_name }}</span>
+      <span class="team-picker-abbr">{{ team.abbreviation }}</span>
+    </button>
+  </form>
+  {% endfor %}
+</div>
+{% endblock %}

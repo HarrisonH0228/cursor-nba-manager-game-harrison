@@ -2,7 +2,7 @@ import random
 
 from flask import redirect, session, url_for
 
-from fetcher import fetch_teams
+from fetcher import fetch_team, fetch_teams
 import season_store
 
 SESSION_GAME_STARTED = "game_started"
@@ -45,9 +45,14 @@ def save_session_season(season_id, season_data, current_session=None):
     set_season_id(season_id, current_session)
 
 
-def start_game(current_session=None):
+def start_game(current_session=None, team_id=None):
     current_session = current_session if current_session is not None else session
-    team = random.choice(fetch_teams())
+    if team_id is not None:
+        team = fetch_team(team_id)
+        if not team:
+            return None
+    else:
+        team = random.choice(fetch_teams())
     current_session[SESSION_GAME_STARTED] = True
     current_session[SESSION_TEAM_ID] = team["id"]
     current_session[SESSION_TEAM_NAME] = team["full_name"]

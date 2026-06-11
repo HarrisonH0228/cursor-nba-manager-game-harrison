@@ -797,3 +797,64 @@ form.d-inline { display: inline !important; }
   color: #fbbf24;
   line-height: 1;
 }
+
+/* ── Team picker ── */
+.btn-nba-sm {
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8125rem;
+}
+
+.team-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.team-picker-form {
+  margin: 0;
+}
+
+.team-picker-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 160px;
+  padding: 1.25rem 0.75rem;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: center;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.team-picker-card:hover,
+.team-picker-card:focus-visible {
+  border-color: var(--text-muted);
+  background: var(--bg);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+.team-picker-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.team-picker-abbr {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.choose-team-header {
+  position: relative;
+  z-index: 1;
+}

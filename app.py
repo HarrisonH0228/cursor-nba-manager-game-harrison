@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
 import cache
-from fetcher import refresh_cache
+from fetcher import fetch_teams, refresh_cache
 from game import (
     clear_game,
     get_game,
@@ -299,9 +299,44 @@ def index():
     )
 
 
+@app.route("/choose-team")
+def choose_team():
+    game = get_game()
+    if game is not None:
+        return redirect(url_for("index"))
+    teams = sorted(fetch_teams(), key=lambda team: team["full_name"])
+    return render_template(
+        "choose_team.html",
+        page_title="Choose Your Team",
+        teams=teams,
+    )
+
+
 @app.route("/start", methods=["POST"])
 def start():
     team = start_game()
+    flash(f"You rolled the {team['full_name']}!")
+    return redirect(url_for("team"))
+
+
+@app.route("/start/pick", methods=["POST"])
+def start_pick():
+    team_id_raw = request.form.get("team_id", "").strip()
+    if not team_id_raw.isdigit():
+        flash("Select a valid team.", "error")
+        return redirect(url_for("choose_team"))
+
+    team_id = int(team_id_raw)
+    valid_ids = {team["id"] for team in fetch_teams()}
+    if team_id not in valid_ids:
+        flash("Select a valid team.", "error")
+        return redirect(url_for("choose_team"))
+
+    team = start_game(team_id=team_id)
+    if team is None:
+        flash("Could not start with that team. Try again.", "error")
+        return redirect(url_for("choose_team"))
+
     flash(f"You are the GM of the {team['full_name']}!")
     return redirect(url_for("team"))
 
@@ -1314,6 +1349,33 @@ def refresh():
     if success:
         return redirect(url_for("search", refreshed=1))
     return redirect(url_for("search", stale=1))
+
+
+@app.errorhandler(404)
+def not_found(error):
+    return (
+        render_template(
+            "error.html",
+            page_title="Not Found",
+            error_code=404,
+            error_message="Page not found.",
+        ),
+        404,
+    )
+
+
+@app.errorhandler(500)
+def server_error(error):
+    app.logger.exception("Internal server error: %s", error)
+    return (
+        render_template(
+            "error.html",
+            page_title="Error",
+            error_code=500,
+            error_message="Something went wrong. Please try again.",
+        ),
+        500,
+    )
 
 
 if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
