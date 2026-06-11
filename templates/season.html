@@ -56,12 +56,9 @@
 
   {% if season %}
   <div style="display:flex;flex-wrap:wrap;gap:.5rem;">
-    <a href="{{ url_for('season_hub') }}" class="btn-nba-ghost {% if page == 'hub' %}active{% endif %}"
-       style="{% if page == 'hub' %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">Standings</a>
-    <a href="{{ url_for('season_schedule') }}" class="btn-nba-ghost {% if page == 'schedule' %}active{% endif %}"
-       style="{% if page == 'schedule' %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">Schedule</a>
-    <a href="{{ url_for('season_playoffs') }}" class="btn-nba-ghost {% if page == 'playoffs' %}active{% endif %}"
-       style="{% if page == 'playoffs' %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">Playoffs</a>
+    <a href="{{ url_for('season_hub') }}" class="btn-nba-ghost {% if page == 'hub' %}sort-active{% endif %}">Standings</a>
+    <a href="{{ url_for('season_schedule') }}" class="btn-nba-ghost {% if page == 'schedule' %}sort-active{% endif %}">Schedule</a>
+    <a href="{{ url_for('season_playoffs') }}" class="btn-nba-ghost {% if page == 'playoffs' %}sort-active{% endif %}">Playoffs</a>
   </div>
   {% endif %}
 </div>

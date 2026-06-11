@@ -11,9 +11,6 @@
 </head>
 <body class="d-flex flex-column min-vh-100">
 
-<!-- ambient blue orb -->
-<div class="bg-orb-blue"></div>
-
 <!-- ── Navbar ── -->
 <nav class="nba-navbar">
   <div class="container">
@@ -21,15 +18,13 @@
 
       <!-- Brand -->
       <a class="navbar-brand-nba" href="{{ url_for('index') }}">
-        <!-- NBA silhouette logo (inline SVG) -->
-        <svg class="nba-logo-mark" viewBox="0 0 60 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="60" height="80" rx="6" fill="#C8102E"/>
-          <!-- simplified player silhouette -->
-          <ellipse cx="30" cy="14" rx="7" ry="7" fill="white"/>
-          <path d="M18 28 Q20 22 30 22 Q40 22 42 28 L45 48 L38 48 L36 38 L36 70 L24 70 L24 38 L22 48 L15 48 Z" fill="white"/>
-          <path d="M22 48 L15 60 L20 62 L26 52 Z" fill="white"/>
-          <path d="M38 48 L45 60 L40 62 L34 52 Z" fill="white"/>
-        </svg>
+        <img
+          class="nba-logo-mark"
+          src="https://cdn.nba.com/logos/leagues/logo-nba-logoman.svg"
+          alt="NBA"
+          width="36"
+          height="36"
+        >
         <span><span class="brand-text-nba">NBA</span> <span class="brand-text-mgr">Manager</span></span>
       </a>
 

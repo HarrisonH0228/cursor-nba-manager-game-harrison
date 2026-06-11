@@ -17,8 +17,7 @@
 <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
   {% for col, label in [('overall','OVR'),('name','Name'),('age','Age'),('ppg','PPG'),('rpg','RPG'),('apg','APG')] %}
   <a href="{{ make_fa_url(sort=col, order=next_order(col, sort, order)) }}"
-     class="btn-nba-ghost {% if sort == col %}active{% endif %}"
-     style="{% if sort == col %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">
+     class="btn-nba-ghost {% if sort == col %}sort-active{% endif %}">
     {{ label }}{% if sort == col %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
   </a>
   {% endfor %}

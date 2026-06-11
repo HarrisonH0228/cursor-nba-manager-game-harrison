@@ -59,7 +59,7 @@
 {% if view == 'players' %}
 <!-- ── PLAYERS ── -->
 {% if selected_player %}
-<div class="card-nba mb-4" style="border-color:rgba(29,66,138,0.4);">
+<div class="card-nba mb-4">
   <div class="card-nba-body" style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.75rem;">
     <div>
       <div style="font-weight:800;font-size:1.1rem;margin-bottom:.35rem;">{{ selected_player.name }}</div>
@@ -94,8 +94,7 @@
 <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
   {% for col, label in [('name','Name'),('team','Team'),('overall','OVR'),('ppg','PPG'),('rpg','RPG'),('apg','APG'),('spg','SPG'),('bpg','BPG')] %}
   <a href="{{ make_search_url(sort=col, order=next_order(col, sort, order)) }}"
-     class="btn-nba-ghost"
-     style="{% if sort == col %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">
+     class="btn-nba-ghost {% if sort == col %}sort-active{% endif %}">
     {{ label }}{% if sort == col %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
   </a>
   {% endfor %}
@@ -160,8 +159,7 @@
 <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
   {% for col, label in [('overall','OVR'),('name','Name'),('age','Age'),('gp','GP'),('ppg','PPG'),('rpg','RPG'),('apg','APG'),('spg','SPG'),('bpg','BPG')] %}
   <a href="{{ make_search_url(sort=col, order=next_order(col, sort, order)) }}"
-     class="btn-nba-ghost"
-     style="{% if sort == col %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">
+     class="btn-nba-ghost {% if sort == col %}sort-active{% endif %}">
     {{ label }}{% if sort == col %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
   </a>
   {% endfor %}
@@ -201,8 +199,7 @@
 <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
   {% for col, label in [('team','Team'),('overall','OVR'),('roster_size','Roster')] %}
   <a href="{{ make_search_url(sort=col, order=next_order(col, sort, order)) }}"
-     class="btn-nba-ghost"
-     style="{% if sort == col %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">
+     class="btn-nba-ghost {% if sort == col %}sort-active{% endif %}">
     {{ label }}{% if sort == col %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
   </a>
   {% endfor %}
