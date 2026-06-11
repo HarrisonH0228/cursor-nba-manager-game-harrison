@@ -81,6 +81,19 @@ def roll_game_injuries(season, team_id, roster, day, rng=None) -> list[dict]:
             f"{event['player_name']} ({injury_type}) — out {games_out} game"
             f"{'s' if games_out != 1 else ''}"
         )
+        try:
+            from news import append_news
+            from season import team_name
+
+            append_news(
+                season,
+                "injury",
+                player=event["player_name"],
+                team=team_name(season, team_id),
+                detail=injury_type,
+            )
+        except ImportError:
+            pass
 
     return events
 

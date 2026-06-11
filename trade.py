@@ -124,6 +124,14 @@ def validate_trade(
     if not ok:
         return False, message
 
+    from contracts import validate_trade_cap
+
+    cap_ok, cap_message = validate_trade_cap(
+        season, user_team_id, outgoing_players, incoming_players, lookup
+    )
+    if not cap_ok:
+        return False, cap_message
+
     return True, None
 
 
@@ -274,6 +282,34 @@ def execute_trade(
     message = "Trade completed."
     if released_names:
         message += f" {team_name(season, partner_team_id)} released {', '.join(released_names)} to make room."
+    try:
+        from news import append_news
+
+        for player_id in outgoing_players:
+            player = lookup.get(int(player_id))
+            if player:
+                append_news(
+                    season,
+                    "trade",
+                    team=team_name(season, partner_team_id),
+                    player=player.get("name", player_id),
+                    partner=team_name(season, user_team_id),
+                )
+        for player_id in incoming_players:
+            player = lookup.get(int(player_id))
+            if player:
+                append_news(
+                    season,
+                    "trade",
+                    team=team_name(season, user_team_id),
+                    player=player.get("name", player_id),
+                    partner=team_name(season, partner_team_id),
+                )
+    except ImportError:
+        pass
+    from contracts import refresh_all_team_finances
+
+    refresh_all_team_finances(season, lookup)
     return True, message
 
 
@@ -285,6 +321,20 @@ def team_picks(season, team_id):
 
 def future_team_picks(season, team_id):
     return list(season.get("future_draft_picks", {}).get(str(team_id), []))
+
+
+def pick_trade_preview(season, outgoing_pick, incoming_pick):
+    """Preview pick-for-future trade acceptance."""
+    draft_year = season.get("season_year", 2026) + 1
+    outgoing_val = round(pick_value(outgoing_pick, current_draft_year=draft_year), 1)
+    incoming_val = round(pick_value(incoming_pick, current_draft_year=draft_year), 1)
+    diff = round(abs(outgoing_val - incoming_val), 1)
+    return {
+        "outgoing_val": outgoing_val,
+        "incoming_val": incoming_val,
+        "diff": diff,
+        "would_accept": diff <= TRADE_TOLERANCE,
+    }
 
 
 def other_teams(season, user_team_id):

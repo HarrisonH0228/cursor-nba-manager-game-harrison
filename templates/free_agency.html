@@ -7,13 +7,16 @@
     <h1>Available Players</h1>
     <p class="text-muted-nba">
       Roster: <strong style="color:var(--text);">{{ roster_size }} / {{ max_roster }}</strong>
+      {% if team_finances %}
+      · Cap space: <strong style="color:var(--text);">${{ team_finances.cap_space }}M</strong>
+      · Payroll: ${{ team_finances.payroll }}M / ${{ team_finances.salary_cap }}M
+      {% endif %}
       {% if not can_sign %} · <span style="color:#fcd34d;">Signings unavailable — roster full or window closed</span>{% endif %}
     </p>
   </div>
   <a href="{{ url_for('team') }}" class="btn-nba-secondary">My Team</a>
 </div>
 
-<!-- Sort bar -->
 <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
   {% for col, label in [('overall','OVR'),('name','Name'),('age','Age'),('ppg','PPG'),('rpg','RPG'),('apg','APG')] %}
   <a href="{{ make_fa_url(sort=col, order=next_order(col, sort, order)) }}"
@@ -27,7 +30,7 @@
 <div class="alert-nba alert-nba-info">No free agents available right now.</div>
 {% else %}
 <div class="card-nba" style="overflow-x:auto;">
-  <table class="table-nba" style="min-width:580px;">
+  <table class="table-nba" style="min-width:780px;">
     <thead>
       <tr>
         <th>Player</th>
@@ -35,9 +38,9 @@
         <th>OVR</th>
         <th>Age</th>
         <th>PPG</th>
-        <th>RPG</th>
-        <th>APG</th>
-        {% if can_sign %}<th></th>{% endif %}
+        <th>Ask</th>
+        <th>Min</th>
+        {% if can_sign %}<th>Offer</th>{% endif %}
       </tr>
     </thead>
     <tbody>
@@ -51,14 +54,19 @@
           {% else %}—{% endif %}
         </td>
         <td>{{ player.age if player.age is not none else '—' }}</td>
-        <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
-        <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
-        <td>{{ player.apg if player.apg is not none else '—' }}</td>
+        <td>{{ player.ppg|stat1 }}</td>
+        <td>${{ player.asking_salary }}M</td>
+        <td>${{ player.min_salary }}M</td>
         {% if can_sign %}
-        <td style="text-align:right;">
-          <form method="post" action="{{ url_for('free_agency_sign', player_id=player.id) }}" class="d-inline"
-                onsubmit="return confirm('Sign {{ player.name }}?');">
-            <button type="submit" class="btn-nba-primary" style="padding:.35rem .9rem;font-size:.8rem;border-radius:6px;">Sign</button>
+        <td>
+          <form method="post" action="{{ url_for('free_agency_offer', player_id=player.id) }}" class="d-flex flex-wrap gap-1 align-items-center">
+            <input type="number" name="salary" step="0.1" min="1" value="{{ player.asking_salary }}" class="form-control form-control-sm" style="width:5rem;" required>
+            <select name="years" class="form-control form-control-sm" style="width:3.5rem;">
+              {% for y in range(1, max_fa_years + 1) %}
+              <option value="{{ y }}" {% if y == 2 %}selected{% endif %}>{{ y }}y</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn-nba-primary" style="padding:.35rem .7rem;font-size:.75rem;">Offer</button>
           </form>
         </td>
         {% endif %}

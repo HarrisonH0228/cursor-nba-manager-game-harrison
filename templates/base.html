@@ -59,6 +59,20 @@
   </div>
 </nav>
 
+{% if news_headlines %}
+<div class="news-ticker" aria-live="polite">
+  <span class="news-ticker-label">NEWS</span>
+  <div class="news-ticker-track">
+    {% for headline in news_headlines %}
+    <span class="news-ticker-item">{{ headline }}</span>
+    {% endfor %}
+    {% for headline in news_headlines %}
+    <span class="news-ticker-item">{{ headline }}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 <!-- ── Main ── -->
 <main class="container flex-grow-1 py-4">
   {% with messages = get_flashed_messages() %}

@@ -3,7 +3,7 @@
 import random
 
 from attributes import generate_rookie_profile, init_rookie_career_profile
-from names import generate_player_name
+from names import ensure_unique_name, generate_player_name
 from roster import can_add_player, ensure_draft_roster_room, MAX_ROSTER
 from season import (
     allocate_player_id,
@@ -78,6 +78,10 @@ def _build_prospect(season, global_pick, team_count, rng):
     age = rng.randint(19, 22)
     player_id = allocate_player_id(season)
     name = generate_player_name(rng)
+    existing = {p.get("name", "") for p in season.get("players", {}).values()}
+    for prospect in (season.get("draft_state") or {}).get("prospect_pool", []):
+        existing.add(prospect.get("name", ""))
+    name = ensure_unique_name(name, existing)
     profile = generate_rookie_profile(scout_grade, rng)
     attributes = profile["attributes"]
     prospect = {
@@ -210,6 +214,42 @@ def start_draft(season, lookup=None, rng=None):
     return season["draft_state"]
 
 
+def draft_pick_trade_context(season, team_id):
+    """Build UI context for pick-for-future trade preview."""
+    from trade import pick_trade_preview, pick_value, TRADE_TOLERANCE
+
+    slot = current_pick(season)
+    if not slot:
+        return None
+    owner_id = _pick_owner(slot)
+    if owner_id != team_id:
+        return None
+
+    round_num = slot["round"]
+    picks = list(season.get("draft_picks", {}).get(str(owner_id), []))
+    outgoing = None
+    for pick in picks:
+        if pick.get("round") == round_num and pick.get("original_team_id") == slot["team_id"]:
+            outgoing = pick
+            break
+    if outgoing is None:
+        for pick in picks:
+            if pick.get("round") == round_num:
+                outgoing = pick
+                break
+
+    draft_year = season.get("season_year", 2026) + 1
+    outgoing_val = round(pick_value(outgoing, current_draft_year=draft_year), 1) if outgoing else 0
+
+    return {
+        "slot": slot,
+        "outgoing_pick": outgoing,
+        "outgoing_val": outgoing_val,
+        "trade_tolerance": TRADE_TOLERANCE,
+        "pick_trade_preview": pick_trade_preview,
+    }
+
+
 def current_pick(season):
     state = season.get("draft_state")
     if not state:
@@ -236,11 +276,14 @@ def _consume_pick_asset_for_slot(season, owner_team_id, slot_team_id, round_num)
     return None
 
 
-def _assign_rookie(season, prospect, team_id):
+def _assign_rookie(season, prospect, team_id, draft_round=1):
     prospect["team_id"] = team_id
     prospect["team"] = team_name(season, team_id)
     prospect["drafted"] = True
     prospect["stats_source"] = "generated"
+    from contracts import assign_rookie_contract
+
+    assign_rookie_contract(prospect, draft_round=draft_round)
     season["players"][str(prospect["id"])] = prospect
     roster = season["rosters"].setdefault(str(team_id), [])
     if prospect["id"] not in roster:
@@ -297,7 +340,22 @@ def make_pick(season, team_id, prospect=None, rng=None, auto_trim=False):
     if consumed is None:
         return False, "No pick asset available for this slot."
 
-    _assign_rookie(season, prospect, team_id)
+    _assign_rookie(season, prospect, team_id, draft_round=round_num)
+
+    try:
+        from news import append_news
+
+        append_news(
+            season,
+            "draft",
+            team=team_name(season, team_id),
+            player=prospect["name"],
+        )
+    except ImportError:
+        pass
+    from contracts import refresh_all_team_finances
+
+    refresh_all_team_finances(season, lookup)
 
     state["recent_picks"].insert(
         0,
@@ -410,6 +468,19 @@ def trade_pick_for_future(season, team_id, partner_team_id, incoming_future_pick
     )
     state["recent_picks"] = state["recent_picks"][:20]
     _advance_pick_state(season)
+
+    try:
+        from news import append_news
+
+        append_news(
+            season,
+            "pick_trade",
+            team=team_name(season, team_id),
+            year=incoming_pick["year"],
+            round=incoming_pick["round"],
+        )
+    except ImportError:
+        pass
 
     return True, (
         f"Traded pick #{slot['pick_number']} for "

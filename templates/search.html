@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% macro stat_cell(player, stat_key) %}
-{{ player[stat_key] if player[stat_key] is not none else '—' }}
+{% if stat_key == 'ppg' %}{{ player.ppg|stat1 }}{% else %}{{ player[stat_key] if player[stat_key] is not none else '—' }}{% endif %}
 {% if player[stat_key] is not none and (sort == stat_key or player.id == selected_id) and player.ranks.get(stat_key) %}
 <span class="badge-nba badge-nba-gray" style="font-size:.65rem;">#{{ player.ranks[stat_key] }}</span>
 {% endif %}
@@ -178,7 +178,7 @@
         <td><span class="badge-nba badge-nba-gray">{{ positions_label(player.positions) }}</span></td>
         <td>{{ player.age if player.age is not none else '—' }}</td>
         <td style="color:var(--text-muted);">{{ player.gp if player.gp is not none else '—' }}</td>
-        <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
+        <td>{{ player.ppg|stat1 }}</td>
         <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
         <td>{{ player.apg if player.apg is not none else '—' }}</td>
         <td style="color:var(--text-muted);">{{ player.spg if player.spg is not none else '—' }}</td>

@@ -1,5 +1,6 @@
 """Roster size limits, releases, and free-agent signings."""
 
+from names import dedupe_all_player_names
 from season import can_trade, league_lookup, team_name
 
 MAX_ROSTER = 15
@@ -153,32 +154,28 @@ def release_player(season, team_id, player_id, force=False):
 
     player["team_id"] = None
     player["team"] = "Free Agent"
+    try:
+        from contracts import compute_asking_salary, refresh_all_team_finances
+        player["asking_salary"] = compute_asking_salary(player)
+        refresh_all_team_finances(season)
+    except ImportError:
+        pass
     _sync_free_agents(season)
     return True, f"Released {player.get('name', player_id)} to free agency."
 
 
-def sign_free_agent(season, team_id, player_id):
+def sign_free_agent(season, team_id, player_id, salary=None, years=2):
+    """Sign FA with contract offer (defaults to asking salary)."""
+    from contracts import compute_asking_salary, propose_offer
+
     if not can_trade(season):
         return False, "Free-agent signings are not available in this phase."
 
-    player_id = int(player_id)
-    if not can_add_player(season, team_id):
-        return False, f"Roster is full ({MAX_ROSTER} players). Release someone first."
-
     lookup = league_lookup(season)
-    player = lookup.get(player_id)
+    player = lookup.get(int(player_id))
     if not player:
         return False, "Player not found."
-    if player.get("team_id"):
-        return False, "Player is already on a team."
-    if player_id not in season.get("free_agents", []):
-        return False, "Player is not a free agent."
-
-    roster = season["rosters"].setdefault(str(team_id), [])
-    if player_id not in roster:
-        roster.append(player_id)
-
-    player["team_id"] = team_id
-    player["team"] = team_name(season, team_id)
-    _sync_free_agents(season)
-    return True, f"Signed {player.get('name', player_id)}."
+    if salary is None:
+        salary = player.get("asking_salary") or compute_asking_salary(player)
+    ok, message, _accepted = propose_offer(season, team_id, player_id, salary, years)
+    return ok, message

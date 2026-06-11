@@ -737,3 +737,37 @@ h1, h2, h3, h4, h5, h6 {
 
 /* ── Inline forms fix ── */
 form.d-inline { display: inline !important; }
+
+/* ── News ticker ── */
+.news-ticker {
+  background: #111;
+  color: #fff;
+  overflow: hidden;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  font-size: 0.82rem;
+  border-bottom: 1px solid #333;
+}
+.news-ticker-label {
+  background: #fff;
+  color: #111;
+  font-weight: 800;
+  padding: 0.45rem 0.75rem;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+}
+.news-ticker-track {
+  display: inline-flex;
+  gap: 3rem;
+  animation: ticker-scroll 40s linear infinite;
+  padding: 0.45rem 0;
+}
+.news-ticker-item {
+  display: inline-block;
+  padding-right: 3rem;
+}
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}

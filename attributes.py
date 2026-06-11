@@ -20,7 +20,7 @@ GAME_NOISE_STDEV = 0.18
 PERFORMANCE_FACTOR_LOW = 0.85
 PERFORMANCE_FACTOR_HIGH = 1.15
 PPG_CURVE_EXPONENT = 1.45
-PPG_CURVE_SCALE = 38.0
+PPG_CURVE_SCALE = 42.0
 STAT_MODIFIER_LOW = 0.68
 STAT_MODIFIER_HIGH = 1.32
 GAME_PTS_SOFT_CAP = 45
@@ -65,7 +65,6 @@ STAT_FROM_ATTR = {
 }
 
 STAT_DISPLAY_CAPS = {
-    "ppg": 36.0,
     "rpg": 16.0,
     "apg": 12.0,
     "spg": 3.5,
@@ -126,6 +125,8 @@ def _compute_stat_line(attributes, player=None, role_rank=None, roster_size=15):
         value = raw * multipliers.get(stat, 1.0) * stat_mods.get(stat, 1.0) * season_form
         if stat == "ppg":
             value *= role_scale
+            bias = player.get("scoring_bias", 1.0) if player else 1.0
+            value *= bias
         stats[stat] = _clamp_stat(value, stat)
     return stats
 
@@ -502,10 +503,12 @@ def _assign_stat_modifiers(player, rng):
     if player.get("stat_modifiers"):
         return
     player_rng = _player_rng(player, rng)
-    player["stat_modifiers"] = {
+    mods = {
         stat: round(player_rng.uniform(STAT_MODIFIER_LOW, STAT_MODIFIER_HIGH), 3)
         for stat in STAT_FROM_ATTR
     }
+    mods["ppg"] = round(player_rng.uniform(0.85, 1.20), 3)
+    player["stat_modifiers"] = mods
 
 
 def _assign_peak_attributes(player, rng):
@@ -618,6 +621,8 @@ def init_career_profile(player, rng=None):
     _assign_potential(player, rng)
     _assign_peak_attributes(player, rng)
     _assign_stat_modifiers(player, rng)
+    if player.get("scoring_bias") is None:
+        player["scoring_bias"] = round(rng.uniform(0.92, 1.12), 3)
     if player.get("season_gp") is None:
         player["season_gp"] = 0
 
@@ -663,6 +668,9 @@ def effective_attributes(player):
 
 
 def refresh_player_from_attributes(player, effective_attrs=None, role_rank=None, roster_size=15):
+    manual_ppg = None
+    if player.get("stats_source") == "manual" and player.get("ppg") is not None:
+        manual_ppg = float(player["ppg"])
     if effective_attrs is None:
         effective_attrs = effective_attributes(player)
     player["attributes"] = dict(effective_attrs)
@@ -670,6 +678,8 @@ def refresh_player_from_attributes(player, effective_attrs=None, role_rank=None,
         effective_attrs, player, role_rank=role_rank, roster_size=roster_size
     )
     player.update(stats)
+    if manual_ppg is not None:
+        player["ppg"] = round(manual_ppg, 1)
     return player
 
 

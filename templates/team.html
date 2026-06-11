@@ -13,6 +13,10 @@
       {% if team_rank %}<span class="badge-nba badge-nba-gray">League #{{ team_rank }}</span>{% endif %}
       {% endif %}
       <span class="badge-nba badge-nba-blue">{{ roster_size }} / {{ max_roster }} players</span>
+      {% if team_finances %}
+      <span class="badge-nba badge-nba-gray">Cap: ${{ team_finances.cap_space }}M</span>
+      <span class="badge-nba badge-nba-gray">Payroll: ${{ team_finances.payroll }}M</span>
+      {% endif %}
       {% if last_updated %}
       <span style="color:var(--text-muted);font-size:0.75rem;">· Updated {{ last_updated }}</span>
       {% endif %}
@@ -55,6 +59,8 @@
         <th>Pos</th>
         <th>Age</th>
         <th>GP</th>
+        <th>Sal</th>
+        <th>Yrs</th>
         <th>PPG</th>
         <th>RPG</th>
         <th>APG</th>
@@ -80,7 +86,9 @@
         <td><span class="badge-nba badge-nba-gray">{{ positions_label(player.positions) }}</span></td>
         <td>{{ player.age if player.age is not none else '—' }}</td>
         <td style="color:var(--text-muted);">{{ player.gp if player.gp is not none else '—' }}</td>
-        <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
+        <td>${{ player.salary if player.salary is not none else '—' }}M</td>
+        <td>{{ player.contract_years if player.contract_years is not none else '—' }}</td>
+        <td>{{ player.ppg|stat1 }}</td>
         <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
         <td>{{ player.apg if player.apg is not none else '—' }}</td>
         <td style="color:var(--text-muted);">{{ player.spg if player.spg is not none else '—' }}</td>

@@ -20,6 +20,9 @@ DEFAULT_SEASON = {
     "schedule": [],
     "playoffs": None,
     "recent_results": [],
+    "news_feed": [],
+    "team_finances": {},
+    "pending_fa_offers": {},
     "free_agents": [],
 }
 

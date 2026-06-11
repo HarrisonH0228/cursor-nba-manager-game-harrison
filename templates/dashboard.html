@@ -38,6 +38,16 @@
     </div>
   </div>
 
+  {% if team_finances %}
+  <div class="col-sm-6 col-lg-4">
+    <div class="stat-card white-accent">
+      <div class="stat-card-label">Cap Space</div>
+      <div class="stat-card-value">${{ team_finances.cap_space }}M</div>
+      <div class="stat-card-sub">Payroll ${{ team_finances.payroll }}M / ${{ team_finances.salary_cap }}M</div>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="col-lg-4">
     <div class="stat-card white-accent" style="display:flex;flex-direction:column;gap:.75rem;">
       <div class="stat-card-label">Quick Actions</div>
@@ -76,7 +86,7 @@
             {% else %}—{% endif %}
           </td>
           <td>{{ player.age if player.age is not none else '—' }}</td>
-          <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
+          <td>{{ player.ppg|stat1 }}</td>
           <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
           <td>{{ player.apg if player.apg is not none else '—' }}</td>
         </tr>

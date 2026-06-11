@@ -38,6 +38,7 @@ from season import (
 )
 from draft import (
     draft_board_context,
+    draft_pick_trade_context,
     make_pick,
     sim_draft_to_user_pick,
     sim_rest_of_draft,
@@ -53,7 +54,6 @@ from roster import (
     release_player,
     repair_roster_sync,
     roster_size,
-    sign_free_agent,
 )
 from trade import (
     cpu_accepts_trade,
@@ -61,9 +61,12 @@ from trade import (
     execute_trade,
     future_team_picks,
     other_teams,
+    pick_trade_preview,
+    pick_value,
     team_picks,
     trade_window_message,
     validate_trade,
+    TRADE_TOLERANCE,
 )
 from attributes import apply_attributes, ensure_positions, init_career_profiles, needs_attributes, positions_label, scouting_upside_tier
 from ratings import (
@@ -78,6 +81,14 @@ from ratings import (
 )
 from admin import admin_bp
 from attributes import refresh_team_roster_stats
+from contracts import (
+    MAX_FA_YEARS,
+    compute_asking_salary,
+    min_acceptable_salary,
+    propose_offer,
+    team_finances,
+)
+from news import news_headlines
 from scheduler import start_scheduler
 
 load_dotenv()
@@ -85,6 +96,17 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
 app.register_blueprint(admin_bp)
+
+
+@app.template_filter("stat1")
+def stat1(value):
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return "—"
+
 
 SORT_COLUMNS = {"name", "team", "overall", "ppg", "rpg", "apg", "spg", "bpg"}
 ROSTER_SORT_COLUMNS = {"name", "overall", "age", "gp", "position", "ppg", "rpg", "apg", "spg", "bpg"}
@@ -236,11 +258,13 @@ def _known_team_ids(all_players):
 @app.context_processor
 def inject_game():
     _, season_data = load_session_season()
+    headlines = news_headlines(season_data) if season_data else []
     return {
         "game": get_game(),
         "active_season": season_data,
         "positions_label": positions_label,
         "max_roster": MAX_ROSTER,
+        "news_headlines": headlines,
     }
 
 
@@ -264,6 +288,7 @@ def index():
         team_rank=team_info["team_rank"],
         roster_size=len(roster),
         top_players=top_players,
+        team_finances=team_finances(season_data, game["team_id"]) if season_data else None,
         last_updated=cache_data.get("last_updated"),
     )
 
@@ -321,6 +346,7 @@ def team():
         stat_columns=STAT_COLUMNS,
         stat_labels=STAT_LABELS,
         positions_label=positions_label,
+        team_finances=team_finances(season_data, game["team_id"]) if season_data else None,
         last_updated=cache_data.get("last_updated"),
     )
 
@@ -366,6 +392,11 @@ def free_agency():
         params.update(overrides)
         return url_for("free_agency", **params)
 
+    finances = team_finances(season_data, game["team_id"], lookup)
+    for player in agents:
+        player["asking_salary"] = player.get("asking_salary") or compute_asking_salary(player)
+        player["min_salary"] = min_acceptable_salary(player)
+
     return render_template(
         "free_agency.html",
         page_title="Free Agency",
@@ -378,7 +409,36 @@ def free_agency():
         next_order=_next_order,
         make_fa_url=make_fa_url,
         positions_label=positions_label,
+        team_finances=finances,
+        max_fa_years=MAX_FA_YEARS,
     )
+
+
+@app.route("/free-agency/offer/<int:player_id>", methods=["POST"])
+def free_agency_offer(player_id):
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    season_id, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("free_agency"))
+
+    salary_raw = request.form.get("salary", "").strip()
+    years_raw = request.form.get("years", "2").strip()
+    try:
+        salary = float(salary_raw)
+    except ValueError:
+        flash("Enter a valid salary.")
+        return redirect(url_for("free_agency"))
+    years = int(years_raw) if years_raw.isdigit() else 2
+
+    ok, message, _accepted = propose_offer(season_data, game["team_id"], player_id, salary, years)
+    save_session_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("free_agency"))
 
 
 @app.route("/free-agency/sign/<int:player_id>", methods=["POST"])
@@ -393,9 +453,15 @@ def free_agency_sign(player_id):
         flash("Start a season first.")
         return redirect(url_for("free_agency"))
 
-    ok, message = sign_free_agent(season_data, game["team_id"], player_id)
-    if ok:
-        save_session_season(season_id, season_data)
+    lookup = league_lookup(season_data)
+    player = lookup.get(player_id)
+    salary = None
+    if player:
+        salary = player.get("asking_salary") or compute_asking_salary(player)
+    ok, message, _accepted = propose_offer(
+        season_data, game["team_id"], player_id, salary or 5.0, 2
+    )
+    save_session_season(season_id, season_data)
     flash(message)
     return redirect(url_for("free_agency"))
 
@@ -1051,11 +1117,24 @@ def season_draft():
     board = draft_board_context(season_data, game["team_id"], lookup)
     for prospect in board.get("prospect_options", []):
         prospect["upside_tier"] = scouting_upside_tier(prospect)
+    pick_trade_ctx = draft_pick_trade_context(season_data, game["team_id"])
     trade_teams = []
     for team in other_teams(season_data, game["team_id"]):
         future_picks = future_team_picks(season_data, team["team_id"])
-        if future_picks:
-            trade_teams.append({**team, "future_picks": future_picks})
+        if not future_picks:
+            continue
+        enriched_picks = []
+        for pick in future_picks:
+            entry = dict(pick)
+            if pick_trade_ctx and pick_trade_ctx.get("outgoing_pick"):
+                preview = pick_trade_preview(
+                    season_data, pick_trade_ctx["outgoing_pick"], pick
+                )
+                entry["trade_val"] = preview["incoming_val"]
+                entry["would_accept"] = preview["would_accept"]
+                entry["val_diff"] = preview["diff"]
+            enriched_picks.append(entry)
+        trade_teams.append({**team, "future_picks": enriched_picks})
     return render_template(
         "draft.html",
         page_title="Draft",
@@ -1064,6 +1143,8 @@ def season_draft():
         board=board,
         user_team_id=game["team_id"],
         trade_teams=trade_teams,
+        pick_trade_ctx=pick_trade_ctx,
+        trade_tolerance=TRADE_TOLERANCE,
         positions_label=positions_label,
     )
 

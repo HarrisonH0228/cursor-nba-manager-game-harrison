@@ -12,6 +12,7 @@ from attributes import (
     needs_attributes,
     refresh_team_roster_stats,
 )
+from names import dedupe_all_player_names
 from ratings import compute_team_overall
 from simulation import simulate_game, simulate_game_with_box_score
 
@@ -106,6 +107,7 @@ def build_player_pool(cache_players, rng=None):
         init_career_profile(entry, rng)
         mark_nba_cache_stats(entry, source_gp=original_gp)
         pool[str(player_id)] = entry
+    dedupe_all_player_names(pool.values())
     return pool
 
 
@@ -150,6 +152,9 @@ def migrate_season(season, rng=None):
     for player in season.get("players", {}).values():
         backfill_career_metadata(player, rng)
     refresh_all_roster_stats(season, lookup)
+    from contracts import ensure_contract_fields
+
+    ensure_contract_fields(season, rng)
     free_agents = []
     for key, player in season.get("players", {}).items():
         if not player.get("team_id"):
@@ -245,6 +250,9 @@ def init_season(players, season_year=2026, rng=None):
         "schedule": schedule,
         "playoffs": None,
         "recent_results": [],
+        "news_feed": [],
+        "team_finances": {},
+        "pending_fa_offers": {},
         "injury_log": [],
         "pending_notifications": [],
     }
@@ -254,6 +262,9 @@ def init_season(players, season_year=2026, rng=None):
     _sync_free_agents(season)
     season["free_agents"] = sorted(set(season.get("free_agents", []) + free_agent_ids))
     refresh_all_roster_stats(season, league_lookup(season))
+    from contracts import assign_initial_contracts
+
+    assign_initial_contracts(season, rng)
     return season
 
 
@@ -514,6 +525,11 @@ def draft_order(season, lookup=None, rng=None):
 
 def advance_season(season, rng=None):
     rng = rng or random.Random()
+    from contracts import expire_contracts, sim_cpu_free_agency
+
+    expire_contracts(season)
+    if season.get("phase") in {"draft", "offseason", "complete"}:
+        sim_cpu_free_agency(season, rng)
     retirements = apply_season_aging(season, rng)
     team_ids = [int(team_id) for team_id in season.get("rosters", {}).keys()]
     team_names = {
@@ -549,6 +565,18 @@ def advance_season(season, rng=None):
             "last_retirements": retirements,
         }
     )
+    try:
+        from news import append_news
+
+        for item in retirements:
+            append_news(
+                season,
+                "retirement",
+                player=item.get("name", "Unknown"),
+                age=item.get("age"),
+            )
+    except ImportError:
+        pass
     for player in season.get("players", {}).values():
         player["season_gp"] = 0
         player["gp"] = 0
@@ -662,6 +690,36 @@ def _record_result(season, game, result):
         },
     )
     season["recent_results"] = season["recent_results"][:20]
+
+    try:
+        from news import append_news
+
+        if top_scorer and top_scorer.get("pts", 0) >= 35:
+            opp_name = away_record["team_name"] if top_scorer in result["home_box"] else home_record["team_name"]
+            append_news(
+                season,
+                "game",
+                player=top_scorer.get("name", "Unknown"),
+                pts=top_scorer["pts"],
+                opp=opp_name,
+            )
+        margin = abs(home_score - away_score)
+        if margin >= 20:
+            winner = home_record if home_score > away_score else away_record
+            loser = away_record if home_score > away_score else home_record
+            w_score = max(home_score, away_score)
+            l_score = min(home_score, away_score)
+            if (loser.get("gp", 0) or 0) >= 10:
+                append_news(
+                    season,
+                    "upset",
+                    winner=winner["team_name"],
+                    loser=loser["team_name"],
+                    w_score=w_score,
+                    l_score=l_score,
+                )
+    except ImportError:
+        pass
 
 
 def _play_game(season, game, lookup, rng, user_team_id=None):

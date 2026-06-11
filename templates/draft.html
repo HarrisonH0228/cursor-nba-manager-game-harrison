@@ -92,7 +92,7 @@
               </div>
             </div>
             <div style="font-size:.8rem;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:.75rem;margin-top:.5rem;">
-              <span>{{ prospect.ppg }} PPG</span>
+              <span>{{ prospect.ppg|stat1 }} PPG</span>
               <span>{{ prospect.rpg }} RPG</span>
               <span>{{ prospect.apg }} APG</span>
               <span style="color:#fbbf24;font-weight:600;">{{ prospect.upside_tier }}</span>
@@ -113,10 +113,17 @@
     {% if trade_teams %}
     <div class="mt-4 pt-3" style="border-top:1px solid var(--border);">
       <h3 style="font-size:.95rem;margin-bottom:.75rem;">Trade Pick for Future Pick</h3>
+      {% if pick_trade_ctx %}
+      <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:.75rem;">
+        Your pick #{{ pick_trade_ctx.slot.pick_number }} (est. value: <strong>{{ pick_trade_ctx.outgoing_val }}</strong>).
+        CPU accepts if within <strong>{{ trade_tolerance }}</strong> pts of their pick's value.
+        Future picks only — use the main Trade page for player deals.
+      </p>
+      {% endif %}
       <form method="post" action="{{ url_for('season_draft_trade_pick') }}" class="row g-2 align-items-end">
         <div class="col-md-4">
           <label class="form-label" style="font-size:.8rem;">Partner Team</label>
-          <select name="partner_id" class="form-control" required>
+          <select name="partner_id" class="form-control" required id="pick-partner">
             <option value="">Select team…</option>
             {% for team in trade_teams %}
             <option value="{{ team.team_id }}">{{ team.team_name }}</option>
@@ -125,11 +132,17 @@
         </div>
         <div class="col-md-5">
           <label class="form-label" style="font-size:.8rem;">Their Future Pick</label>
-          <select name="incoming_future_pick" class="form-control" required>
+          <select name="incoming_future_pick" class="form-control" required id="incoming-pick">
             <option value="">Select pick…</option>
             {% for team in trade_teams %}
               {% for pick in team.future_picks %}
-              <option value="{{ pick.id }}">{{ team.team_name }} — {{ pick.year }} R{{ pick.round }}</option>
+              <option value="{{ pick.id }}" data-partner="{{ team.team_id }}"
+                      class="pick-opt {% if pick.would_accept %}pick-accept{% elif pick.trade_val is defined %}pick-reject{% endif %}"
+                      style="{% if pick.would_accept %}color:#059669{% elif pick.trade_val is defined %}color:#b91c1c{% endif %}">
+                {{ team.team_name }} — {{ pick.year }} R{{ pick.round }}
+                {% if pick.trade_val is defined %}(val {{ pick.trade_val }}, diff {{ pick.val_diff }}){% endif %}
+                {% if pick.would_accept %} ✓{% endif %}
+              </option>
               {% endfor %}
             {% endfor %}
           </select>

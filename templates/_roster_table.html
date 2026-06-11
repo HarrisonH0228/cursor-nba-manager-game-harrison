@@ -1,5 +1,5 @@
 {% macro roster_stat_cell(player, stat_key, sort, show_ranks) %}
-{{ player[stat_key] if player[stat_key] is not none else '—' }}
+{% if stat_key == 'ppg' %}{{ player.ppg|stat1 }}{% else %}{{ player[stat_key] if player[stat_key] is not none else '—' }}{% endif %}
 {% if show_ranks and player[stat_key] is not none and sort == stat_key and player.ranks.get(stat_key) %}
 <span class="badge-nba badge-nba-gray" style="font-size:.65rem;">#{{ player.ranks[stat_key] }}</span>
 {% endif %}
