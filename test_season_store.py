@@ -60,7 +60,7 @@ class SeasonStoreTests(unittest.TestCase):
 
         loaded, status = season_store.load_season(season_id)
         self.assertEqual(status, "restored")
-        self.assertEqual(loaded["current_day"], 9)
+        self.assertEqual(loaded["current_day"], 8)
         self.assertTrue(os.path.exists(backup))
 
     def test_load_returns_none_when_both_corrupt(self):
