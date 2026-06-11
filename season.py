@@ -147,6 +147,7 @@ def migrate_season(season, rng=None):
         season["future_draft_picks"] = init_draft_picks(team_ids, draft_year)
     if "championships" not in season:
         season["championships"] = {}
+    season.setdefault("injury_week_counts", {})
     from roster import repair_roster_sync
 
     repair_roster_sync(season)
@@ -256,6 +257,7 @@ def init_season(players, season_year=2026, rng=None):
         "team_finances": {},
         "pending_fa_offers": {},
         "injury_log": [],
+        "injury_week_counts": {},
         "pending_notifications": [],
         "championships": {},
     }
@@ -752,8 +754,12 @@ def _play_game(season, game, lookup, rng, user_team_id=None):
     away_roster = roster_players(season, game["away_id"], lookup)
     day = game.get("day", season.get("current_day", 1))
 
-    roll_game_injuries(season, game["home_id"], home_roster, day, rng)
-    roll_game_injuries(season, game["away_id"], away_roster, day, rng)
+    roll_game_injuries(
+        season, game["home_id"], home_roster, day, rng, user_team_id=user_team_id
+    )
+    roll_game_injuries(
+        season, game["away_id"], away_roster, day, rng, user_team_id=user_team_id
+    )
 
     home_exclude = game_exclude_ids(home_roster)
     away_exclude = game_exclude_ids(away_roster)
@@ -803,6 +809,13 @@ def simulate_games(season, lookup, rng=None, through_day=None, count_days=None, 
                 break
             _play_game(season, game, lookup, rng, user_team_id=user_team_id)
             games_played += 1
+
+        try:
+            from news import maybe_roll_offcourt_news
+
+            maybe_roll_offcourt_news(season, lookup, day, rng)
+        except ImportError:
+            pass
 
     return games_played
 
@@ -902,6 +915,13 @@ def sim_to_trade_deadline(season, lookup, rng=None, user_team_id=None):
             _play_game(season, game, lookup, rng, user_team_id=user_team_id)
             games_played += 1
 
+        try:
+            from news import maybe_roll_offcourt_news
+
+            maybe_roll_offcourt_news(season, lookup, day, rng)
+        except ImportError:
+            pass
+
         season["current_day"] = day + 1
 
     return games_played
@@ -964,16 +984,21 @@ def _series_label(series):
     return f"{high} {series['high_wins']} – {series['low_wins']} {low}"
 
 
-def _simulate_series(series, season, lookup, rng):
+def _simulate_series(series, season, lookup, rng, user_team_id=None):
     from injuries import game_exclude_ids, roll_game_injuries, tick_injuries_after_game
 
+    user_team_id = user_team_id or season.get("user_team_id")
     day = season.get("current_day", season.get("max_day", 82))
     while series["high_wins"] < PLAYOFF_WINS_NEEDED and series["low_wins"] < PLAYOFF_WINS_NEEDED:
         home_roster = roster_players(season, series["high_seed_id"], lookup)
         away_roster = roster_players(season, series["low_seed_id"], lookup)
 
-        roll_game_injuries(season, series["high_seed_id"], home_roster, day, rng)
-        roll_game_injuries(season, series["low_seed_id"], away_roster, day, rng)
+        roll_game_injuries(
+            season, series["high_seed_id"], home_roster, day, rng, user_team_id=user_team_id
+        )
+        roll_game_injuries(
+            season, series["low_seed_id"], away_roster, day, rng, user_team_id=user_team_id
+        )
 
         home_exclude = game_exclude_ids(home_roster)
         away_exclude = game_exclude_ids(away_roster)

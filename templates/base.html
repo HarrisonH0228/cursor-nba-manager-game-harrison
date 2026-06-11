@@ -77,12 +77,35 @@
 <main class="container flex-grow-1 py-4">
   {% with messages = get_flashed_messages(with_categories=True) %}
   {% if messages %}
-  <div class="mb-4" style="display:flex;flex-direction:column;gap:.5rem;">
-    {% for category, message in messages %}
+  {% set ns = namespace(warnings=[], others=[]) %}
+  {% for category, message in messages %}
+    {% if category == 'warning' %}
+      {% set _ = ns.warnings.append(message) %}
+    {% else %}
+      {% set _ = ns.others.append((category, message)) %}
+    {% endif %}
+  {% endfor %}
+  <div class="mb-4 flash-messages" style="display:flex;flex-direction:column;gap:.5rem;">
+    {% if ns.warnings %}
+    <div class="alert-nba alert-nba-warning injury-flash-group" id="injury-flash-group">
+      <div class="injury-flash-header">
+        <button type="button" class="injury-flash-summary" id="injury-flash-toggle" aria-expanded="false" aria-controls="injury-flash-details">
+          {% if ns.warnings|length == 1 %}Injury: {{ ns.warnings[0] }}{% else %}{{ ns.warnings|length }} players injured on your team{% endif %}
+        </button>
+        <button type="button" class="alert-dismiss-btn" id="injury-flash-dismiss" aria-label="Dismiss injury alerts">&times;</button>
+      </div>
+      {% if ns.warnings|length > 1 %}
+      <ul class="injury-flash-details" id="injury-flash-details" hidden>
+        {% for message in ns.warnings %}
+        <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% for category, message in ns.others %}
     {% if category in ['error', 'danger'] %}
     <div class="alert-nba alert-nba-danger">{{ message }}</div>
-    {% elif category == 'warning' %}
-    <div class="alert-nba alert-nba-warning">{{ message }}</div>
     {% elif category == 'info' %}
     <div class="alert-nba alert-nba-info">{{ message }}</div>
     {% else %}
@@ -146,6 +169,25 @@ function teamLogoUrl(teamName) {
   if (!id) return null;
   return `https://cdn.nba.com/logos/nba/${id}/primary/L/logo.svg`;
 }
+
+/* Injury flash group: expand details + dismiss */
+(function () {
+  var group = document.getElementById('injury-flash-group');
+  var toggle = document.getElementById('injury-flash-toggle');
+  var details = document.getElementById('injury-flash-details');
+  var dismiss = document.getElementById('injury-flash-dismiss');
+  if (!group) return;
+  if (toggle && details) {
+    toggle.addEventListener('click', function () {
+      var expanded = details.hidden;
+      details.hidden = !expanded;
+      toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    });
+  }
+  if (dismiss) {
+    dismiss.addEventListener('click', function () { group.remove(); });
+  }
+})();
 
 /* Wire navbar team logo */
 (function() {

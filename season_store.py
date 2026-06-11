@@ -21,6 +21,7 @@ DEFAULT_SEASON = {
     "playoffs": None,
     "recent_results": [],
     "news_feed": [],
+    "injury_week_counts": {},
     "team_finances": {},
     "pending_fa_offers": {},
     "free_agents": [],

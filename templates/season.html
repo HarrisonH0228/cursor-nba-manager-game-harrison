@@ -237,21 +237,51 @@
 </div>
 
 {% if user_injury_report %}
-<div class="card-nba mb-4">
-  <div class="card-nba-header">
+<div class="card-nba mb-4 injury-report-card" id="injury-report-card">
+  <div class="card-nba-header injury-report-header" id="injury-report-header" role="button" tabindex="0" aria-expanded="true" aria-controls="injury-report-body">
     <h2>Your Injury Report</h2>
-    <span class="badge-nba badge-nba-red">Medical</span>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge-nba badge-nba-red">Medical</span>
+      <button type="button" class="collapse-toggle-btn" id="injury-report-toggle" aria-label="Toggle injury report">−</button>
+    </div>
   </div>
-  {% for injury in user_injury_report %}
-  <div class="series-item">
-    <span style="flex:1;font-weight:600;">
-      {{ injury.player_name }}
-      <span style="color:var(--text-muted);">({{ injury.type }})</span>
-      — out {{ injury.games_remaining }} game{% if injury.games_remaining != 1 %}s{% endif %}
-    </span>
+  <div class="injury-report-body" id="injury-report-body">
+    {% for injury in user_injury_report %}
+    <div class="series-item">
+      <span style="flex:1;font-weight:600;">
+        {{ injury.player_name }}
+        <span style="color:var(--text-muted);">({{ injury.type }})</span>
+        — out {{ injury.games_remaining }} game{% if injury.games_remaining != 1 %}s{% endif %}
+      </span>
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
 </div>
+<script>
+(function () {
+  var key = 'nba_injury_report_collapsed';
+  var body = document.getElementById('injury-report-body');
+  var toggle = document.getElementById('injury-report-toggle');
+  var header = document.getElementById('injury-report-header');
+  if (!body || !toggle || !header) return;
+
+  function setCollapsed(collapsed) {
+    body.hidden = collapsed;
+    toggle.textContent = collapsed ? '+' : '−';
+    header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    try { sessionStorage.setItem(key, collapsed ? '1' : '0'); } catch (e) {}
+  }
+
+  setCollapsed(sessionStorage.getItem(key) === '1');
+
+  function onToggle() { setCollapsed(!body.hidden); }
+  toggle.addEventListener('click', function (e) { e.stopPropagation(); onToggle(); });
+  header.addEventListener('click', onToggle);
+  header.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
+  });
+})();
+</script>
 {% endif %}
 
 {% if season.recent_results %}

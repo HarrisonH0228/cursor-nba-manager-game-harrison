@@ -8,6 +8,7 @@ from unittest.mock import patch
 import season_store
 from attributes import apply_attributes
 from injuries import (
+    MAX_INJURIES_PER_WEEK,
     build_dnp_list,
     drain_pending_notifications,
     game_exclude_ids,
@@ -57,7 +58,12 @@ class InjuryTests(unittest.TestCase):
 
         with patch("injuries.INJURY_CHANCE_PER_GAME", 1.0):
             events = roll_game_injuries(
-                self.season, user_team, roster, day=1, rng=random.Random(1)
+                self.season,
+                user_team,
+                roster,
+                day=1,
+                rng=random.Random(1),
+                user_team_id=user_team,
             )
 
         self.assertTrue(events)
@@ -91,6 +97,57 @@ class InjuryTests(unittest.TestCase):
         sim_day(self.season, lookup, rng=random.Random(99))
         pending = drain_pending_notifications(self.season)
         self.assertIsInstance(pending, list)
+
+    def test_league_weekly_injury_cap(self):
+        lookup = league_lookup(self.season)
+        self.season["injury_log"] = []
+        self.season["injury_week_counts"] = {}
+        team_ids = [int(tid) for tid in self.season["rosters"].keys()]
+        with patch("injuries.INJURY_CHANCE_PER_GAME", 1.0):
+            for team_id in team_ids:
+                roster = roster_players(self.season, team_id, lookup)
+                for player in roster:
+                    player.pop("injury", None)
+                roll_game_injuries(
+                    self.season, team_id, roster, day=1, rng=random.Random(3)
+                )
+        week_zero_injuries = [
+            event for event in self.season["injury_log"] if event.get("day") == 1
+        ]
+        self.assertLessEqual(len(week_zero_injuries), MAX_INJURIES_PER_WEEK)
+
+    def test_pending_notifications_user_team_only(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        other_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+        lookup = league_lookup(self.season)
+        self.season["pending_notifications"] = []
+        self.season["injury_week_counts"] = {}
+
+        for team_id in (user_team, other_team):
+            roster = roster_players(self.season, team_id, lookup)
+            for player in roster:
+                player.pop("injury", None)
+
+        with patch("injuries.INJURY_CHANCE_PER_GAME", 1.0):
+            roll_game_injuries(
+                self.season,
+                other_team,
+                roster_players(self.season, other_team, lookup),
+                day=1,
+                rng=random.Random(5),
+                user_team_id=user_team,
+            )
+            self.assertEqual(self.season["pending_notifications"], [])
+
+            roll_game_injuries(
+                self.season,
+                user_team,
+                roster_players(self.season, user_team, lookup),
+                day=8,
+                rng=random.Random(6),
+                user_team_id=user_team,
+            )
+            self.assertTrue(self.season["pending_notifications"])
 
     def test_tick_injuries_clears_after_games(self):
         lookup = league_lookup(self.season)

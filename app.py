@@ -260,7 +260,10 @@ def _known_team_ids(all_players):
 def inject_game():
     _, season_data = load_session_season()
     game = get_game()
-    headlines = news_headlines(season_data) if season_data else []
+    lookup = league_lookup(season_data) if season_data else None
+    headlines = (
+        news_headlines(season_data, lookup=lookup, limit=12) if season_data else []
+    )
     user_championships = (
         championship_count(season_data, game["team_id"]) if game and season_data else 0
     )
@@ -862,10 +865,10 @@ def _save_season(season_id, season_data):
     save_session_season(season_id, season_data)
 
 
-def _flash_injury_notifications(season_data):
+def _flash_injury_notifications(season_data, user_team_id=None):
     if not season_data:
         return
-    for message in drain_pending_notifications(season_data):
+    for message in drain_pending_notifications(season_data, user_team_id=user_team_id):
         flash(message, "warning")
 
 
@@ -947,7 +950,7 @@ def season_sim_full():
 
     count = sim_rest_of_season(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
-    _flash_injury_notifications(season_data)
+    _flash_injury_notifications(season_data, user_team_id=game["team_id"])
     flash(f"Simulated {count} games. Regular season complete.")
     return redirect(url_for("season_hub"))
 
@@ -1020,7 +1023,7 @@ def season_sim_day():
 
     count = sim_day(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
-    _flash_injury_notifications(season_data)
+    _flash_injury_notifications(season_data, user_team_id=game["team_id"])
     flash(f"Simulated day {season_data.get('current_day', 1) - 1}: {count} games.")
     return redirect(url_for("season_hub"))
 
@@ -1039,7 +1042,7 @@ def season_sim_week():
 
     count = sim_week(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
-    _flash_injury_notifications(season_data)
+    _flash_injury_notifications(season_data, user_team_id=game["team_id"])
     flash(f"Simulated one week: {count} games.")
     return redirect(url_for("season_hub"))
 
@@ -1058,7 +1061,7 @@ def season_sim_trade_deadline():
 
     count = sim_to_trade_deadline(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
-    _flash_injury_notifications(season_data)
+    _flash_injury_notifications(season_data, user_team_id=game["team_id"])
     flash(f"Simulated to trade deadline (~55 GP): {count} games.")
     return redirect(url_for("season_hub"))
 

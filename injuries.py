@@ -17,9 +17,25 @@ INJURY_TYPES = (
     "wrist",
 )
 
-INJURY_CHANCE_PER_GAME = 0.008
+INJURY_CHANCE_PER_GAME = 0.0015
 SEVERE_INJURY_CHANCE = 0.15
+MAX_INJURIES_PER_WEEK = 2
 MIN_GAME_PLAYERS = 5
+
+
+def _league_week(day):
+    return (int(day) - 1) // 7
+
+
+def _can_add_league_injury(season, day) -> bool:
+    counts = season.setdefault("injury_week_counts", {})
+    return counts.get(str(_league_week(day)), 0) < MAX_INJURIES_PER_WEEK
+
+
+def _record_league_injury(season, day) -> None:
+    counts = season.setdefault("injury_week_counts", {})
+    week_key = str(_league_week(day))
+    counts[week_key] = counts.get(week_key, 0) + 1
 
 
 def player_is_injured(player) -> bool:
@@ -73,7 +89,7 @@ def _injury_duration(rng, severe):
     return rng.randint(1, 5)
 
 
-def roll_game_injuries(season, team_id, roster, day, rng=None) -> list[dict]:
+def roll_game_injuries(season, team_id, roster, day, rng=None, user_team_id=None) -> list[dict]:
     """Roll new injuries for rotation players; return notification dicts."""
     rng = rng or random.Random()
     pool = team_rating_pool(roster)
@@ -84,9 +100,12 @@ def roll_game_injuries(season, team_id, roster, day, rng=None) -> list[dict]:
     events = []
     injury_log = season.setdefault("injury_log", [])
     pending = season.setdefault("pending_notifications", [])
+    notify_user = user_team_id is not None and int(team_id) == int(user_team_id)
 
     for player in rotation:
         if player_is_injured(player):
+            continue
+        if not _can_add_league_injury(season, day):
             continue
         if rng.random() >= INJURY_CHANCE_PER_GAME:
             continue
@@ -100,6 +119,7 @@ def roll_game_injuries(season, team_id, roster, day, rng=None) -> list[dict]:
             "day_reported": day,
             "severe": severe,
         }
+        _record_league_injury(season, day)
 
         event = {
             "player_id": player["id"],
@@ -112,10 +132,11 @@ def roll_game_injuries(season, team_id, roster, day, rng=None) -> list[dict]:
         events.append(event)
         injury_log.append(event)
         injury_log[:] = injury_log[-50:]
-        pending.append(
-            f"{event['player_name']} ({injury_type}) — out {games_out} game"
-            f"{'s' if games_out != 1 else ''}"
-        )
+        if notify_user:
+            pending.append(
+                f"{event['player_name']} ({injury_type}) — out {games_out} game"
+                f"{'s' if games_out != 1 else ''}"
+            )
         try:
             from news import append_news
             from season import team_name
@@ -174,7 +195,9 @@ def user_team_injury_report(season, user_team_id, lookup):
     return report
 
 
-def drain_pending_notifications(season) -> list[str]:
+def drain_pending_notifications(season, user_team_id=None) -> list[str]:
     pending = list(season.get("pending_notifications") or [])
     season["pending_notifications"] = []
+    if user_team_id is None:
+        return pending
     return pending

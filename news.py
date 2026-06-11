@@ -2,69 +2,15 @@
 
 import random
 
-MAX_NEWS_ITEMS = 30
+from attributes import ROTATION_SIZE, team_rating_pool
+from news_templates import TEMPLATES
 
-_TEMPLATES = {
-    "trade": [
-        "Sources say {team} traded {player} for 'culture' and a bag of picks",
-        "BREAKING: {team} ships {player} out — league insiders cite 'vibes'",
-        "{team} and {partner} completed a trade involving {player}. Nobody clapped.",
-        "Trade alert: {player} is headed to {team}. Fantasy managers in shambles.",
-    ],
-    "signing": [
-        "{player} signs with {team} for ${salary}M/yr, reportedly for the cafeteria fries",
-        "{team} lands {player} on a ${salary}M deal — agent calls it 'market rate, emotionally'",
-        "Free agency: {player} chooses {team} over literally sleeping on it",
-        "{player} inks with {team}. Contract: ${salary}M. Happiness: pending.",
-    ],
-    "rejection": [
-        "{player} declined {team}'s ${salary}M offer, calling it 'a participation trophy contract'",
-        "{player} told {team} to try again — with more zeros",
-        "Sources: {player} rejected {team}'s offer and went to touch grass",
-        "{player} passed on {team}. 'I know my worth,' said someone who definitely does.",
-    ],
-    "injury": [
-        "{player} listed as OUT ({detail})",
-        "{player} is day-to-day with a classic case of being too good",
-        "Injury report: {player} — {detail}. Rival fans nod solemnly.",
-        "{team}: {player} unavailable. Reason: {detail}",
-    ],
-    "game": [
-        "{player} dropped {pts} on {opp}; defenders filed a complaint",
-        "{player} went for {pts} vs {opp}. The box score needs a nap.",
-        "Hot take: {player}'s {pts}-point night against {opp} was 'pretty good'",
-        "{opp} couldn't stop {player} ({pts} PTS). Film study cancelled.",
-    ],
-    "upset": [
-        "UPSET: {winner} ({w_score}) stuns {loser} ({l_score}). Brackets weep.",
-        "{loser} lost to {winner}. Somewhere, a fan yelled at their TV.",
-        "Shocker: {winner} beats {loser} {w_score}-{l_score}. Math is broken.",
-    ],
-    "draft": [
-        "{team} selects {player}; scout notes: 'he looks fast in 2K'",
-        "With the pick, {team} takes {player}. Twitter is undefeated.",
-        "{team} drafts {player}. Ceiling: sky. Floor: also sky, allegedly.",
-        "Draft pick: {team} grabs {player}. Analysts say 'sure, why not'",
-    ],
-    "retirement": [
-        "{player} hangs it up at {age}; league mourns, fantasy GMs rejoice",
-        "{player} announces retirement. Highlights reel loading…",
-        "End of an era: {player} retires. Someone please tell their agent.",
-    ],
-    "pick_trade": [
-        "{team} traded a pick for a {year} R{round} future pick. Time travel confirmed.",
-        "Draft trade: {team} swaps picks for {year} R{round}. GM playing 4D chess (probably).",
-    ],
-    "championship": [
-        "CHAMPIONS: {team} win the NBA Finals — Larry O'Brien trophy secured",
-        "{team} capture the title. Parade planning already underway.",
-        "NBA Finals: {team} hoist the trophy. Confetti budget: unlimited.",
-    ],
-}
+MAX_NEWS_ITEMS = 30
+OFFCOURT_NEWS_CHANCE = 0.35
 
 
 def _format_headline(season, category, context):
-    templates = _TEMPLATES.get(category, ["{team} did something."])
+    templates = TEMPLATES.get(category, ["{team} did something."])
     indices = season.setdefault("news_template_index", {})
     start = indices.get(category, 0)
     safe = {k: str(v) for k, v in context.items() if v is not None}
@@ -96,7 +42,47 @@ def append_news(season, category, **context):
     return headline
 
 
-def news_headlines(season, limit=12):
+def _random_player_context(season, lookup, rng):
+    from season import roster_players, team_name
+
+    team_ids = [int(tid) for tid in season.get("rosters", {}).keys()]
+    if not team_ids:
+        return None
+    team_id = rng.choice(team_ids)
+    roster = roster_players(season, team_id, lookup)
+    if not roster:
+        return None
+    pool = team_rating_pool(roster)
+    if not pool:
+        pool = sorted(roster, key=lambda player: player.get("overall") or 0, reverse=True)
+    player = rng.choice(pool[:ROTATION_SIZE] or pool)
+    return {
+        "player": player.get("name", "Unknown"),
+        "team": team_name(season, team_id),
+        "team_id": team_id,
+    }
+
+
+def _ambient_headline(season, lookup, rng, existing):
+    ctx = _random_player_context(season, lookup, rng)
+    if not ctx:
+        return None
+    category = rng.choice(["offcourt", "ambient"])
+    templates = TEMPLATES.get(category, [])
+    if not templates:
+        return None
+    for _ in range(len(templates)):
+        template = rng.choice(templates)
+        try:
+            headline = template.format(**{k: str(v) for k, v in ctx.items() if v is not None})
+        except KeyError:
+            headline = template
+        if headline not in existing:
+            return headline
+    return None
+
+
+def news_headlines(season, limit=12, lookup=None, rng=None):
     seen = set()
     unique = []
     for headline in season.get("news_feed", []):
@@ -106,4 +92,33 @@ def news_headlines(season, limit=12):
         unique.append(headline)
         if len(unique) >= limit:
             break
+
+    if len(unique) >= limit or not lookup:
+        return unique
+
+    rng = rng or random.Random()
+    attempts = 0
+    while len(unique) < limit and attempts < limit * 4:
+        attempts += 1
+        headline = _ambient_headline(season, lookup, rng, seen)
+        if headline:
+            seen.add(headline)
+            unique.append(headline)
+
     return unique
+
+
+def maybe_roll_offcourt_news(season, lookup, day, rng=None):
+    """Maybe add a fake off-court player headline once per simulated day."""
+    rng = rng or random.Random()
+    if rng.random() >= OFFCOURT_NEWS_CHANCE:
+        return ""
+    ctx = _random_player_context(season, lookup, rng)
+    if not ctx:
+        return ""
+    return append_news(
+        season,
+        "offcourt",
+        player=ctx["player"],
+        team=ctx["team"],
+    )

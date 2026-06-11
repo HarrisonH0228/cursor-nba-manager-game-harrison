@@ -3,9 +3,13 @@
 import unittest
 
 from news import MAX_NEWS_ITEMS, append_news, news_headlines
+from news_templates import template_count
 
 
 class NewsTests(unittest.TestCase):
+    def test_template_count_at_least_100(self):
+        self.assertGreaterEqual(template_count(), 100)
+
     def test_append_news_adds_headline(self):
         season = {"news_feed": []}
         headline = append_news(season, "signing", player="Test Player", team="Lakers", salary=10)
@@ -39,6 +43,23 @@ class NewsTests(unittest.TestCase):
         season = {"news_feed": ["A", "B", "A", "C", "B"]}
         headlines = news_headlines(season, limit=12)
         self.assertEqual(headlines, ["A", "B", "C"])
+
+    def test_news_headlines_pads_with_ambient_when_lookup_provided(self):
+        import random
+
+        import cache
+        from attributes import apply_attributes
+        from ratings import apply_ratings
+        from season import init_season, league_lookup
+
+        cache_data = cache.load_cache()
+        players = list(cache_data.get("players", []))
+        apply_ratings(players)
+        apply_attributes(players)
+        season = init_season(players, season_year=2026, rng=random.Random(1))
+        lookup = league_lookup(season)
+        headlines = news_headlines(season, limit=12, lookup=lookup, rng=random.Random(2))
+        self.assertGreaterEqual(len(headlines), 12)
 
 
 if __name__ == "__main__":
