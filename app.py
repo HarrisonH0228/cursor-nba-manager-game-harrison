@@ -65,7 +65,9 @@ from attributes import (
     VALID_POSITIONS,
     apply_attributes,
     ensure_positions,
+    init_career_profile,
     init_career_profiles,
+    effective_attributes,
     needs_attributes,
     positions_label,
     scouting_upside_tier,
@@ -81,7 +83,23 @@ from ratings import (
     needs_ratings,
 )
 from scheduler import start_scheduler
-from custom_players import add_custom_player, delete_custom_player, list_custom_players
+from custom_players import (
+    add_custom_player,
+    delete_custom_player,
+    get_custom_player,
+    list_custom_players,
+    parse_career_from_form,
+    parse_attributes_from_form,
+    update_custom_player,
+)
+from admin_roster import (
+    admin_move_player,
+    admin_place_custom_on_team,
+    admin_release_player,
+    admin_sign_free_agent,
+    admin_update_league_player,
+    list_season_teams,
+)
 
 load_dotenv()
 
@@ -1149,18 +1167,41 @@ def _admin_guard():
     return None
 
 
+def _admin_player_form_data(form):
+    overclock = form.get("overclock") == "on"
+    return {
+        "name": form.get("name", ""),
+        "age": form.get("age", 19),
+        "positions": form.getlist("positions"),
+        "attributes": {key: form.get(key) for key in ATTRIBUTE_KEYS},
+        "potential": form.get("potential") or None,
+        "overclock": overclock,
+        "career": parse_career_from_form(form, overclocked=overclock),
+    }
+
+
+def _admin_season_context():
+    _, _, lookup, season_id, season_data = _season_context()
+    teams = list_season_teams(season_data) if season_data else []
+    return season_id, season_data, lookup, teams
+
+
 @app.route("/admin")
 def admin_panel():
     blocked = _admin_guard()
     if blocked is not None:
         return blocked
 
+    season_id, season_data, _, teams = _admin_season_context()
     return render_template(
         "admin.html",
         page_title="Admin",
         custom_players=list_custom_players(),
         attribute_keys=ATTRIBUTE_KEYS,
         valid_positions=VALID_POSITIONS,
+        season_id=season_id,
+        season_data=season_data,
+        teams=teams,
     )
 
 
@@ -1170,21 +1211,67 @@ def admin_add_player():
     if blocked is not None:
         return blocked
 
+    form_data = _admin_player_form_data(request.form)
+    assign_team_id = request.form.get("assign_team_id", "").strip()
+
     try:
-        add_custom_player(
-            name=request.form.get("name", ""),
-            age=request.form.get("age", 19),
-            positions=request.form.getlist("positions"),
-            attributes={key: request.form.get(key) for key in ATTRIBUTE_KEYS},
-            potential=request.form.get("potential") or None,
-            overclock=request.form.get("overclock") == "on",
-        )
+        entry = add_custom_player(**form_data)
     except ValueError as exc:
         flash(str(exc))
         return redirect(url_for("admin_panel"))
 
-    flash("Custom player added. They will appear in the next draft.")
+    message = "Custom player added to the draft pool."
+    if assign_team_id.isdigit():
+        season_id, season_data, _, _ = _admin_season_context()
+        if season_data:
+            ok, _, assign_message = admin_place_custom_on_team(
+                season_data,
+                entry["custom_id"],
+                int(assign_team_id),
+            )
+            if ok:
+                _save_season(season_id, season_data)
+                message = assign_message
+            else:
+                message = f"{message} {assign_message}"
+        else:
+            message = f"{message} Start a season to assign players to teams."
+
+    flash(message)
     return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/players/<custom_id>/edit", methods=["GET", "POST"])
+def admin_edit_custom_player(custom_id):
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    player = get_custom_player(custom_id)
+    if not player:
+        flash("Custom player not found.")
+        return redirect(url_for("admin_panel"))
+
+    if request.method == "POST":
+        form_data = _admin_player_form_data(request.form)
+        try:
+            updated = update_custom_player(custom_id, **form_data)
+        except ValueError as exc:
+            flash(str(exc))
+            return redirect(url_for("admin_edit_custom_player", custom_id=custom_id))
+        if updated:
+            flash(f"Updated {updated['name']}.")
+        else:
+            flash("Custom player not found.")
+        return redirect(url_for("admin_panel"))
+
+    return render_template(
+        "admin_edit_custom.html",
+        page_title=f"Edit {player['name']}",
+        player=player,
+        attribute_keys=ATTRIBUTE_KEYS,
+        valid_positions=VALID_POSITIONS,
+    )
 
 
 @app.route("/admin/players/<custom_id>/delete", methods=["POST"])
@@ -1198,6 +1285,185 @@ def admin_delete_player(custom_id):
     else:
         flash("Custom player not found.")
     return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/rosters")
+def admin_rosters():
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    season_id, season_data, lookup, teams = _admin_season_context()
+    team_id_raw = request.args.get("team_id", "").strip()
+    selected_team_id = int(team_id_raw) if team_id_raw.isdigit() else None
+    if selected_team_id is None and teams:
+        selected_team_id = teams[0]["team_id"]
+
+    roster = []
+    selected_team = None
+    free_agents = []
+    if season_data and selected_team_id is not None:
+        roster = roster_players(season_data, selected_team_id, lookup)
+        selected_team = next((team for team in teams if team["team_id"] == selected_team_id), None)
+        free_agents = sorted(
+            free_agent_players(season_data, lookup),
+            key=lambda player: player.get("name", "").lower(),
+        )
+
+    return render_template(
+        "admin_rosters.html",
+        page_title="Admin Rosters",
+        season_data=season_data,
+        teams=teams,
+        selected_team_id=selected_team_id,
+        selected_team=selected_team,
+        roster=roster,
+        custom_players=list_custom_players(),
+        free_agents=free_agents,
+    )
+
+
+@app.route("/admin/rosters/assign-custom", methods=["POST"])
+def admin_roster_assign_custom():
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    season_id, season_data, _, _ = _admin_season_context()
+    if not season_data:
+        flash("No active season.")
+        return redirect(url_for("admin_rosters"))
+
+    team_id = request.form.get("team_id", "").strip()
+    custom_id = request.form.get("custom_id", "").strip()
+    if not team_id.isdigit() or not custom_id:
+        flash("Team and custom player are required.")
+        return redirect(url_for("admin_rosters", team_id=team_id or None))
+
+    ok, _, message = admin_place_custom_on_team(season_data, custom_id, int(team_id))
+    if ok:
+        _save_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("admin_rosters", team_id=team_id))
+
+
+@app.route("/admin/rosters/release", methods=["POST"])
+def admin_roster_release():
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    season_id, season_data, _, _ = _admin_season_context()
+    if not season_data:
+        flash("No active season.")
+        return redirect(url_for("admin_rosters"))
+
+    team_id = request.form.get("team_id", "").strip()
+    player_id = request.form.get("player_id", "").strip()
+    if not team_id.isdigit() or not player_id.isdigit():
+        flash("Invalid release request.")
+        return redirect(url_for("admin_rosters", team_id=team_id or None))
+
+    ok, message = admin_release_player(season_data, int(team_id), int(player_id))
+    if ok:
+        _save_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("admin_rosters", team_id=team_id))
+
+
+@app.route("/admin/rosters/move", methods=["POST"])
+def admin_roster_move():
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    season_id, season_data, _, _ = _admin_season_context()
+    if not season_data:
+        flash("No active season.")
+        return redirect(url_for("admin_rosters"))
+
+    player_id = request.form.get("player_id", "").strip()
+    dest_team_id = request.form.get("dest_team_id", "").strip()
+    source_team_id = request.form.get("source_team_id", "").strip()
+    if not player_id.isdigit() or not dest_team_id.isdigit():
+        flash("Invalid move request.")
+        return redirect(url_for("admin_rosters", team_id=source_team_id or None))
+
+    ok, message = admin_move_player(season_data, int(player_id), int(dest_team_id))
+    if ok:
+        _save_season(season_id, season_data)
+        source_team_id = dest_team_id
+    flash(message)
+    return redirect(url_for("admin_rosters", team_id=source_team_id or dest_team_id))
+
+
+@app.route("/admin/rosters/sign-fa", methods=["POST"])
+def admin_roster_sign_fa():
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    season_id, season_data, _, _ = _admin_season_context()
+    if not season_data:
+        flash("No active season.")
+        return redirect(url_for("admin_rosters"))
+
+    team_id = request.form.get("team_id", "").strip()
+    player_id = request.form.get("player_id", "").strip()
+    if not team_id.isdigit() or not player_id.isdigit():
+        flash("Invalid signing request.")
+        return redirect(url_for("admin_rosters", team_id=team_id or None))
+
+    ok, message = admin_sign_free_agent(season_data, int(team_id), int(player_id))
+    if ok:
+        _save_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("admin_rosters", team_id=team_id))
+
+
+@app.route("/admin/league-players/<int:player_id>/edit", methods=["GET", "POST"])
+def admin_edit_league_player(player_id):
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    season_id, season_data, lookup, _ = _admin_season_context()
+    if not season_data:
+        flash("No active season.")
+        return redirect(url_for("admin_rosters"))
+
+    player = lookup.get(player_id)
+    if not player:
+        flash("Player not found.")
+        return redirect(url_for("admin_rosters"))
+
+    init_career_profile(player)
+
+    if request.method == "POST":
+        overclock = player.get("is_overclocked", False)
+        career = parse_career_from_form(request.form, overclocked=overclock)
+        attributes = parse_attributes_from_form(request.form, overclocked=overclock)
+        ok, message = admin_update_league_player(
+            season_data,
+            player_id,
+            career=career,
+            attributes=attributes,
+        )
+        if ok:
+            _save_season(season_id, season_data)
+        flash(message)
+        return redirect(url_for("admin_rosters", team_id=player.get("team_id")))
+
+    edit_player = dict(player)
+    edit_player["attributes"] = player.get("base_attributes") or effective_attributes(player)
+
+    return render_template(
+        "admin_edit_league.html",
+        page_title=f"Edit {player.get('name', player_id)}",
+        player=player,
+        edit_player=edit_player,
+        attribute_keys=ATTRIBUTE_KEYS,
+    )
 
 
 @app.route("/refresh")

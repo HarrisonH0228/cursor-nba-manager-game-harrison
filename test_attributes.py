@@ -117,6 +117,100 @@ class AttributeTests(unittest.TestCase):
         self.assertTrue(result["home_box"])
         self.assertTrue(result["away_box"])
 
+    def test_doubled_ppg_roster_scores_higher(self):
+        team_id = self.players[0]["team_id"]
+        base_roster = [dict(player) for player in self.players if player.get("team_id") == team_id]
+        boosted_roster = []
+        for player in base_roster:
+            boosted = dict(player)
+            boosted["ppg"] = (player.get("ppg") or 0) * 2
+            boosted_roster.append(boosted)
+
+        opponent_id = next(player["team_id"] for player in self.players if player["team_id"] != team_id)
+        away_roster = [dict(player) for player in self.players if player.get("team_id") == opponent_id]
+
+        base_scores = []
+        boosted_scores = []
+        for trial in range(200):
+            base_result = simulate_game_with_box_score(
+                base_roster,
+                away_roster,
+                rng=random.Random(1000 + trial),
+            )
+            boosted_result = simulate_game_with_box_score(
+                boosted_roster,
+                away_roster,
+                rng=random.Random(2000 + trial),
+            )
+            base_scores.append(base_result["home_score"])
+            boosted_scores.append(boosted_result["home_score"])
+
+        self.assertGreater(sum(boosted_scores) / len(boosted_scores), sum(base_scores) / len(base_scores) * 1.5)
+
+    def test_star_scoring_tracks_ppg(self):
+        team_id = self.players[0]["team_id"]
+        roster = [dict(player) for player in self.players if player.get("team_id") == team_id]
+        star = max(roster, key=lambda player: player.get("overall") or 0)
+        star["ppg"] = 30
+        opponent_id = next(player["team_id"] for player in self.players if player["team_id"] != team_id)
+        away_roster = [dict(player) for player in self.players if player.get("team_id") == opponent_id]
+
+        star_points = []
+        for trial in range(100):
+            result = simulate_game_with_box_score(
+                roster,
+                away_roster,
+                rng=random.Random(3000 + trial),
+            )
+            star_line = next(line for line in result["home_box"] if line["player_id"] == star["id"])
+            star_points.append(star_line["pts"])
+
+        avg_pts = sum(star_points) / len(star_points)
+        self.assertGreater(avg_pts, 18)
+        self.assertLess(avg_pts, 55)
+
+    def test_realistic_team_score_range(self):
+        team_id = self.players[0]["team_id"]
+        roster = [player for player in self.players if player.get("team_id") == team_id]
+        opponent_id = next(player["team_id"] for player in self.players if player["team_id"] != team_id)
+        away_roster = [player for player in self.players if player.get("team_id") == opponent_id]
+
+        scores = []
+        for trial in range(200):
+            result = simulate_game_with_box_score(
+                roster,
+                away_roster,
+                rng=random.Random(4000 + trial),
+            )
+            scores.append(result["home_score"])
+            scores.append(result["away_score"])
+
+        scores.sort()
+        median = scores[len(scores) // 2]
+        self.assertGreater(median, 80)
+        self.assertLess(median, 140)
+
+    def test_home_court_advantage_with_equal_rosters(self):
+        team_id = self.players[0]["team_id"]
+        template = [dict(player) for player in self.players if player.get("team_id") == team_id]
+        home_roster = [dict(player) for player in template]
+        away_roster = [dict(player) for player in template]
+
+        home_wins = 0
+        trials = 500
+        for trial in range(trials):
+            result = simulate_game_with_box_score(
+                home_roster,
+                away_roster,
+                rng=random.Random(5000 + trial),
+            )
+            if result["home_score"] > result["away_score"]:
+                home_wins += 1
+
+        win_rate = home_wins / trials
+        self.assertGreater(win_rate, 0.52)
+        self.assertLess(win_rate, 0.65)
+
     def test_position_stat_profiles(self):
         attrs = {"scoring": 70, "playmaking": 70, "rebounding": 70, "defense": 70, "efficiency": 70, "stamina": 80}
         pg_stats = season_averages_from_attributes_deterministic(attrs, {"positions": ["PG"]})

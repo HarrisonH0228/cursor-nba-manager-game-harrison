@@ -94,6 +94,58 @@ class CustomPlayerTests(unittest.TestCase):
 
         self.assertTrue(found)
 
+    def test_custom_player_career_profile_is_applied(self):
+        entry = add_custom_player(
+            name="Curved Prospect",
+            age=19,
+            positions=["PG"],
+            attributes={key: 75 for key in ("scoring", "playmaking", "rebounding", "defense", "efficiency", "stamina")},
+            potential=88,
+            career={
+                "peak_age": 27,
+                "retirement_age": 36,
+                "development_rate": 1.8,
+                "peak_attributes": {"scoring": 92, "playmaking": 90},
+            },
+        )
+        self.assertEqual(entry["career"]["peak_age"], 27)
+        self.assertEqual(entry["career"]["development_rate"], 1.8)
+
+        season = init_season(self.players, season_year=2026, rng=random.Random(12))
+        from custom_players import build_prospect_from_template
+
+        prospect = build_prospect_from_template(season, entry, rng=random.Random(13))
+        self.assertEqual(prospect["peak_age"], 27)
+        self.assertEqual(prospect["retirement_age"], 36)
+        self.assertEqual(prospect["development_rate"], 1.8)
+        self.assertEqual(prospect["peak_attributes"]["scoring"], 92)
+        delete_custom_player(entry["custom_id"])
+
+    def test_admin_place_custom_on_team(self):
+        from admin_roster import admin_place_custom_on_team, admin_release_player
+        from season import roster_players
+
+        entry = add_custom_player(
+            name="Direct Sign",
+            age=20,
+            positions=["C"],
+            attributes={key: 82 for key in ("scoring", "playmaking", "rebounding", "defense", "efficiency", "stamina")},
+        )
+        season = init_season(self.players, season_year=2026, rng=random.Random(14))
+        lookup = league_lookup(season)
+        team_id = int(next(iter(season["standings"])))
+
+        ok, prospect, message = admin_place_custom_on_team(season, entry["custom_id"], team_id)
+        self.assertTrue(ok, message)
+        self.assertEqual(prospect["team_id"], team_id)
+        lookup = league_lookup(season)
+        roster = roster_players(season, team_id, lookup)
+        self.assertTrue(any(player["id"] == prospect["id"] for player in roster))
+
+        ok, message = admin_release_player(season, team_id, prospect["id"])
+        self.assertTrue(ok, message)
+        delete_custom_player(entry["custom_id"])
+
     def test_custom_player_removed_after_drafted(self):
         entry = add_custom_player(
             name="One And Done",

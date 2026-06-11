@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_admin_player_fields.html" import attribute_fields, career_fields, attr_sync_script %}
+
+{% block content %}
+<div class="mb-4">
+    <a href="{{ url_for('admin_rosters', team_id=player.team_id) }}" class="text-decoration-none">&larr; Back to rosters</a>
+    <h1 class="mt-2 mb-1">Edit {{ player.name }}</h1>
+    <p class="text-muted">
+        {{ player.team or 'Free Agent' }} · Age {{ player.age }} · OVR {{ player.overall }}
+        {% if player.is_overclocked %}<span class="badge text-bg-warning">OC</span>{% endif %}
+    </p>
+</div>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-body">
+                <form method="post" action="{{ url_for('admin_edit_league_player', player_id=player.id) }}">
+                    {{ attribute_fields(attribute_keys, edit_player) }}
+                    {{ career_fields(attribute_keys, player=player, career={
+                        'peak_age': player.peak_age,
+                        'retirement_age': player.retirement_age,
+                        'development_rate': player.development_rate,
+                        'peak_attributes': player.peak_attributes,
+                    }, peak_section_id='leaguePeakAttrs', overclocked=player.is_overclocked) }}
+                    <button type="submit" class="btn btn-primary">Save changes</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{{ attr_sync_script() }}
+{% endblock %}

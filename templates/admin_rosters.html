@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div>
+        <h1 class="mb-1">Admin — Roster editor</h1>
+        <p class="text-muted mb-0">Add, release, and move players on any team. Ignores roster limits and phase locks.</p>
+    </div>
+</div>
+
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link" href="{{ url_for('admin_panel') }}">Draft pool</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link active" href="{{ url_for('admin_rosters') }}">Roster editor</a>
+    </li>
+</ul>
+
+{% if not season_data %}
+<div class="alert alert-warning">
+    No active season in your session. Start or load a season from the Season hub to edit rosters.
+</div>
+{% else %}
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h2 class="h6 mb-0">Select team</h2>
+            </div>
+            <div class="card-body">
+                <form method="get" action="{{ url_for('admin_rosters') }}">
+                    <select class="form-select mb-3" name="team_id" onchange="this.form.submit()">
+                        {% for team in teams %}
+                        <option value="{{ team.team_id }}" {% if team.team_id == selected_team_id %}selected{% endif %}>
+                            {{ team.team_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </form>
+
+                {% if selected_team %}
+                <p class="small text-muted mb-0">
+                    {{ roster|length }} players · {{ selected_team.team_name }}
+                </p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if selected_team_id %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <h2 class="h6 mb-0">Add custom player to team</h2>
+            </div>
+            <div class="card-body">
+                {% if custom_players %}
+                <form method="post" action="{{ url_for('admin_roster_assign_custom') }}">
+                    <input type="hidden" name="team_id" value="{{ selected_team_id }}">
+                    <select class="form-select mb-3" name="custom_id" required>
+                        <option value="">Choose player…</option>
+                        {% for player in custom_players %}
+                        <option value="{{ player.custom_id }}">{{ player.name }} (OVR {{ player.overall }})</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-primary btn-sm">Add to roster</button>
+                </form>
+                {% else %}
+                <p class="text-muted small mb-0">No custom players in the draft pool.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="h6 mb-0">Sign free agent</h2>
+            </div>
+            <div class="card-body">
+                {% if free_agents %}
+                <form method="post" action="{{ url_for('admin_roster_sign_fa') }}">
+                    <input type="hidden" name="team_id" value="{{ selected_team_id }}">
+                    <select class="form-select mb-3" name="player_id" required>
+                        <option value="">Choose free agent…</option>
+                        {% for player in free_agents %}
+                        <option value="{{ player.id }}">{{ player.name }} (OVR {{ player.overall }})</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-outline-primary btn-sm">Sign</button>
+                </form>
+                {% else %}
+                <p class="text-muted small mb-0">No free agents available.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="col-lg-8">
+        {% if selected_team_id and roster %}
+        <div class="card">
+            <div class="card-header">
+                <h2 class="h6 mb-0">{{ selected_team.team_name }} roster</h2>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-striped align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Pos</th>
+                            <th>Age</th>
+                            <th>OVR</th>
+                            <th>Peak / Ret</th>
+                            <th>Dev</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for player in roster %}
+                        <tr>
+                            <td class="fw-semibold">
+                                {{ player.name }}
+                                {% if player.is_overclocked %}<span class="badge text-bg-warning ms-1">OC</span>{% endif %}
+                            </td>
+                            <td>{{ positions_label(player.positions) }}</td>
+                            <td>{{ player.age }}</td>
+                            <td>{{ player.overall }}</td>
+                            <td class="small">{{ player.peak_age or '?' }} / {{ player.retirement_age or '?' }}</td>
+                            <td class="small">{{ player.development_rate or '—' }}</td>
+                            <td class="text-end">
+                                <div class="d-flex flex-wrap gap-1 justify-content-end">
+                                    <a class="btn btn-outline-secondary btn-sm"
+                                       href="{{ url_for('admin_edit_league_player', player_id=player.id) }}">Edit</a>
+                                    <form method="post" class="d-inline"
+                                          action="{{ url_for('admin_roster_move') }}"
+                                          onsubmit="return confirm('Move {{ player.name }}?');">
+                                        <input type="hidden" name="player_id" value="{{ player.id }}">
+                                        <input type="hidden" name="source_team_id" value="{{ selected_team_id }}">
+                                        <select class="form-select form-select-sm d-inline-block" style="width: auto"
+                                                name="dest_team_id" required>
+                                            {% for team in teams if team.team_id != selected_team_id %}
+                                            <option value="{{ team.team_id }}">{{ team.team_name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button type="submit" class="btn btn-outline-primary btn-sm">Move</button>
+                                    </form>
+                                    <form method="post" class="d-inline"
+                                          action="{{ url_for('admin_roster_release') }}"
+                                          onsubmit="return confirm('Release {{ player.name }} to free agency?');">
+                                        <input type="hidden" name="team_id" value="{{ selected_team_id }}">
+                                        <input type="hidden" name="player_id" value="{{ player.id }}">
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">Release</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% elif selected_team_id %}
+        <div class="card">
+            <div class="card-body text-muted">This roster is empty.</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

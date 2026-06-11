@@ -18,6 +18,9 @@ ADMIN_POTENTIAL_MAX = 999
 TEAM_MINUTES = 240
 ROTATION_SIZE = 8
 GAME_NOISE_STDEV = 0.25
+PER36_MINUTES = 36.0
+SEASON_RATE_KEYS = ("ppg", "rpg", "apg", "spg", "bpg")
+BOX_STAT_KEYS = {"ppg": "pts", "rpg": "reb", "apg": "ast", "spg": "stl", "bpg": "blk"}
 CAREER_START_AGE = 19
 CAREER_START_MULTIPLIER = 0.78
 PEAK_AGE_MIN = 28
@@ -80,7 +83,10 @@ def _attr_limits(player=None):
 
 def _clamp_attr(value, player=None):
     low, high = _attr_limits(player)
-    return max(low, min(high, round(value)))
+    rounded = round(value)
+    if player and player.get("is_overclocked"):
+        return max(low, rounded)
+    return max(low, min(high, rounded))
 
 
 def parse_nba_position(position_str):
@@ -437,6 +443,14 @@ def _assign_peak_attributes(player, rng):
     player["peak_attributes"] = peak
 
 
+def _store_peak_ceiling(value, fallback=MIN_ATTR):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = fallback
+    return max(MIN_ATTR, round(parsed))
+
+
 def _attribute_ceiling(player, attr_key):
     peak = player.get("peak_attributes")
     if peak and attr_key in peak:
@@ -466,7 +480,11 @@ def _apply_development(player, rng):
         if current >= ceiling:
             continue
         delta = max(1, round((ceiling - current) * growth_rate))
-        base[key] = _clamp(min(current + delta, ceiling))
+        updated = min(current + delta, ceiling)
+        if player.get("is_overclocked"):
+            base[key] = max(MIN_ATTR, round(updated))
+        else:
+            base[key] = _clamp(updated)
 
 
 def _apply_seasonal_noise(player, rng):
@@ -614,11 +632,34 @@ def init_rookie_career_profile(player, effective_attrs, rng=None):
     return player
 
 
-def init_custom_rookie_career_profile(player, effective_attrs, rng=None, potential=None, overclocked=False):
+def init_custom_rookie_career_profile(
+    player,
+    effective_attrs,
+    rng=None,
+    potential=None,
+    overclocked=False,
+    career=None,
+):
     rng = rng or random.Random()
+    career = career or {}
     ensure_positions(player)
-    player["peak_age"] = rng.randint(PEAK_AGE_MIN, PEAK_AGE_MAX)
-    player["retirement_age"] = rng.randint(RETIRE_AGE_MIN, RETIRE_AGE_MAX)
+
+    peak_age = career.get("peak_age")
+    if peak_age is not None:
+        player["peak_age"] = int(peak_age)
+    else:
+        player["peak_age"] = rng.randint(PEAK_AGE_MIN, PEAK_AGE_MAX)
+
+    retirement_age = career.get("retirement_age")
+    if retirement_age is not None:
+        player["retirement_age"] = int(retirement_age)
+    else:
+        player["retirement_age"] = rng.randint(RETIRE_AGE_MIN, RETIRE_AGE_MAX)
+
+    development_rate = career.get("development_rate")
+    if development_rate is not None:
+        player["development_rate"] = round(float(development_rate), 3)
+
     player["season_gp"] = 0
     if overclocked:
         player["is_overclocked"] = True
@@ -629,13 +670,18 @@ def init_custom_rookie_career_profile(player, effective_attrs, rng=None, potenti
         _assign_potential(player, rng)
         if overclocked and player.get("potential", 0) > POTENTIAL_MAX:
             player["potential"] = min(player["potential"], ADMIN_POTENTIAL_MAX)
-    if overclocked:
+    custom_peaks = career.get("peak_attributes") or {}
+    if custom_peaks:
         player["peak_attributes"] = {
-            key: _clamp_attr(effective_attrs.get(key, MIN_ATTR) + rng.randint(4, 10), player)
+            key: _store_peak_ceiling(
+                custom_peaks.get(key, effective_attrs.get(key, MIN_ATTR)),
+                fallback=effective_attrs.get(key, MIN_ATTR),
+            )
             for key in ATTRIBUTE_KEYS
         }
-        player["base_attributes"] = {
-            key: _clamp_attr(effective_attrs.get(key, MIN_ATTR), player)
+    elif overclocked:
+        player["peak_attributes"] = {
+            key: _clamp_attr(effective_attrs.get(key, MIN_ATTR) + rng.randint(4, 10), player)
             for key in ATTRIBUTE_KEYS
         }
     else:
@@ -643,6 +689,13 @@ def init_custom_rookie_career_profile(player, effective_attrs, rng=None, potenti
             key: _clamp(effective_attrs.get(key, MIN_ATTR) + rng.randint(4, 10))
             for key in ATTRIBUTE_KEYS
         }
+
+    if overclocked:
+        player["base_attributes"] = {
+            key: _clamp_attr(effective_attrs.get(key, MIN_ATTR), player)
+            for key in ATTRIBUTE_KEYS
+        }
+    else:
         age = player.get("age", 20)
         multiplier = age_multiplier(age, player["peak_age"])
         stamina_multiplier = stamina_age_multiplier(age, player["peak_age"])
@@ -650,6 +703,48 @@ def init_custom_rookie_career_profile(player, effective_attrs, rng=None, potenti
         player["base_attributes"] = {key: _clamp(scaled.get(key, MIN_ATTR)) for key in ATTRIBUTE_KEYS}
     _assign_stat_modifiers(player, rng)
     refresh_player_from_attributes(player, effective_attributes(player))
+    player["overall"] = compute_intrinsic_overall(player)
+    return player
+
+
+def admin_apply_career_overrides(player, career=None, overclocked=None):
+    """Apply admin-edited career fields to an existing league player."""
+    career = career or {}
+    if career.get("peak_age") is not None:
+        player["peak_age"] = int(career["peak_age"])
+    if career.get("retirement_age") is not None:
+        player["retirement_age"] = int(career["retirement_age"])
+    if career.get("development_rate") is not None:
+        player["development_rate"] = round(float(career["development_rate"]), 3)
+    custom_peaks = career.get("peak_attributes") or {}
+    if custom_peaks:
+        existing = player.get("peak_attributes") or {}
+        player["peak_attributes"] = {
+            key: _store_peak_ceiling(
+                custom_peaks.get(key, existing.get(key, MIN_ATTR)),
+                fallback=existing.get(key, MIN_ATTR),
+            )
+            for key in ATTRIBUTE_KEYS
+        }
+    refresh_player_from_attributes(player)
+    player["overall"] = compute_intrinsic_overall(player)
+    return player
+
+
+def admin_apply_attribute_overrides(player, attributes):
+    """Apply admin-edited base attributes to an existing league player."""
+    if not attributes:
+        return player
+    init_career_profile(player)
+    overclocked = player.get("is_overclocked")
+    clamp = _clamp_attr if overclocked else _clamp
+    base = player.setdefault("base_attributes", {})
+    for key in ATTRIBUTE_KEYS:
+        if key not in attributes:
+            continue
+        value = attributes[key]
+        base[key] = clamp(value, player) if overclocked else clamp(value)
+    refresh_player_from_attributes(player)
     player["overall"] = compute_intrinsic_overall(player)
     return player
 
@@ -708,8 +803,87 @@ def allocate_minutes(roster):
     return minutes
 
 
-def _noisy_weight(base, rng):
-    return base * rng.uniform(1 - GAME_NOISE_STDEV, 1 + GAME_NOISE_STDEV)
+def player_season_rates(player):
+    rates = {}
+    missing = False
+    for stat in SEASON_RATE_KEYS:
+        value = player.get(stat)
+        if value is None:
+            missing = True
+            break
+        rates[stat] = float(value)
+
+    if not missing:
+        return rates
+
+    derived = season_averages_from_attributes_deterministic(
+        effective_attributes(player),
+        player,
+    )
+    return {stat: float(derived.get(stat) or 0) for stat in SEASON_RATE_KEYS}
+
+
+def project_player_game_line(player, minutes, rng, pace_factor=1.0):
+    rates = player_season_rates(player)
+    minute_scale = (minutes / PER36_MINUTES) * pace_factor
+    line = {
+        "player_id": player["id"],
+        "name": player.get("name", str(player["id"])),
+        "min": minutes,
+    }
+    for stat, box_key in BOX_STAT_KEYS.items():
+        noise = rng.uniform(1 - GAME_NOISE_STDEV, 1 + GAME_NOISE_STDEV)
+        line[box_key] = max(0, round(rates.get(stat, 0) * minute_scale * noise))
+    return line
+
+
+def build_team_box_score(roster, rng, pace_factor=None, home_boost=0.0):
+    if pace_factor is None:
+        pace_factor = rng.gauss(1.0, 0.06)
+
+    minutes_map = allocate_minutes(roster)
+    active = [player for player in roster if minutes_map.get(player["id"], 0) > 0]
+    if not active:
+        return []
+
+    box = [
+        project_player_game_line(player, minutes_map[player["id"]], rng, pace_factor)
+        for player in active
+    ]
+
+    boost_total = max(0, round(home_boost))
+    if boost_total and box:
+        point_weights = [line["pts"] if line["pts"] > 0 else 1 for line in box]
+        boosts = _largest_remainder(boost_total, point_weights)
+        for index, line in enumerate(box):
+            line["pts"] += boosts[index]
+
+    box.sort(key=lambda line: line["pts"], reverse=True)
+    return box
+
+
+def _build_team_box_score(roster, team_score, rng):
+    """Legacy wrapper; prefer build_team_box_score."""
+    box = build_team_box_score(roster, rng)
+    total = sum(line["pts"] for line in box)
+    if total == team_score or not box:
+        return box
+
+    if total == 0:
+        boosts = _largest_remainder(team_score, [1] * len(box))
+        for index, line in enumerate(box):
+            line["pts"] = boosts[index]
+        box.sort(key=lambda line: line["pts"], reverse=True)
+        return box
+
+    scale = team_score / total
+    for line in box:
+        line["pts"] = max(0, round(line["pts"] * scale))
+    diff = team_score - sum(line["pts"] for line in box)
+    if diff and box:
+        box[0]["pts"] += diff
+    box.sort(key=lambda line: line["pts"], reverse=True)
+    return box
 
 
 def _largest_remainder(total, weights):
@@ -733,53 +907,3 @@ def _largest_remainder(total, weights):
     for _, index in fractions[:remainder]:
         floors[index] += 1
     return floors
-
-
-def _build_team_box_score(roster, team_score, rng):
-    minutes_map = allocate_minutes(roster)
-    active = [player for player in roster if minutes_map.get(player["id"], 0) > 0]
-    if not active:
-        return []
-
-    pts_weights = []
-    ast_weights = []
-    reb_weights = []
-    stl_weights = []
-    blk_weights = []
-
-    for player in active:
-        attrs = get_attributes(player)
-        mins = minutes_map[player["id"]]
-        efficiency_factor = 0.75 + attrs["efficiency"] / 200
-        pts_weights.append(_noisy_weight(attrs["scoring"] * mins * efficiency_factor, rng))
-        ast_weights.append(_noisy_weight(attrs["playmaking"] * mins, rng))
-        reb_weights.append(_noisy_weight(attrs["rebounding"] * mins, rng))
-        stl_weights.append(_noisy_weight(attrs["defense"] * mins * 0.4, rng))
-        blk_weights.append(_noisy_weight(attrs["defense"] * mins * 0.2, rng))
-
-    target_ast = max(18, round(team_score * 0.22))
-    target_reb = max(35, round(team_score * 0.39))
-
-    points = _largest_remainder(team_score, pts_weights)
-    assists = _largest_remainder(target_ast, ast_weights)
-    rebounds = _largest_remainder(target_reb, reb_weights)
-    steals = _largest_remainder(max(6, round(target_ast * 0.28)), stl_weights)
-    blocks = _largest_remainder(max(4, round(target_reb * 0.09)), blk_weights)
-
-    box = []
-    for index, player in enumerate(active):
-        box.append(
-            {
-                "player_id": player["id"],
-                "name": player.get("name", str(player["id"])),
-                "min": minutes_map[player["id"]],
-                "pts": points[index],
-                "reb": rebounds[index],
-                "ast": assists[index],
-                "stl": steals[index],
-                "blk": blocks[index],
-            }
-        )
-
-    box.sort(key=lambda line: line["pts"], reverse=True)
-    return box
