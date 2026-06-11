@@ -1,7 +1,7 @@
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
 import cache
 from fetcher import refresh_cache
@@ -17,10 +17,15 @@ from game import (
 import season_store
 from season import (
     advance_playoff_round,
+    advance_season,
+    can_trade,
     enrich_game_for_display,
+    find_schedule_game,
     games_played_count,
     init_season,
+    league_lookup,
     regular_season_complete,
+    roster_players,
     schedule_games,
     seed_playoffs,
     sim_day,
@@ -29,7 +34,33 @@ from season import (
     sim_week,
     simulate_all_playoffs,
     standings_table,
+    team_name,
 )
+from draft import (
+    draft_board_context,
+    make_pick,
+    sim_draft_to_user_pick,
+    sim_rest_of_draft,
+    start_draft,
+)
+from roster import (
+    MAX_ROSTER,
+    can_remove_player,
+    free_agent_players,
+    release_player,
+    roster_size,
+    sign_free_agent,
+)
+from trade import (
+    cpu_accepts_trade,
+    evaluate_trade,
+    execute_trade,
+    other_teams,
+    team_picks,
+    trade_window_message,
+    validate_trade,
+)
+from attributes import apply_attributes, ensure_positions, init_career_profiles, needs_attributes, positions_label, scouting_upside_tier
 from ratings import (
     STAT_COLUMNS,
     STAT_LABELS,
@@ -48,7 +79,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
 
 SORT_COLUMNS = {"name", "team", "overall", "ppg", "rpg", "apg", "spg", "bpg"}
-ROSTER_SORT_COLUMNS = {"name", "overall", "age", "gp", "ppg", "rpg", "apg", "spg", "bpg"}
+ROSTER_SORT_COLUMNS = {"name", "overall", "age", "gp", "position", "ppg", "rpg", "apg", "spg", "bpg"}
 TEAM_SORT_COLUMNS = {"team", "overall", "roster_size"}
 VIEW_MODES = {"players", "teams", "roster"}
 
@@ -67,6 +98,13 @@ def _sort_players(players, sort_key, order):
         return sorted(
             players,
             key=lambda player: player.get("team", "").lower(),
+            reverse=reverse,
+        )
+
+    if sort_key == "position":
+        return sorted(
+            players,
+            key=lambda player: (player.get("positions") or ["ZZ"])[0],
             reverse=reverse,
         )
 
@@ -119,20 +157,57 @@ def _load_players():
     if needs_ratings(all_players):
         apply_ratings(all_players)
 
+    if needs_attributes(all_players):
+        apply_attributes(all_players)
+
+    init_career_profiles(all_players)
+    for player in all_players:
+        ensure_positions(player)
+
     return cache_data, all_players
 
 
-def _team_context(all_players, team_id):
-    roster = [player for player in all_players if player.get("team_id") == team_id]
+def _season_player_lookup(season_data=None):
+    if season_data is None:
+        _, season_data = load_session_season()
+    if season_data and season_data.get("players"):
+        return league_lookup(season_data)
+    _, all_players = _load_players()
+    return {player["id"]: player for player in all_players}
+
+
+def _active_players(season_data=None):
+    cache_data, all_players = _load_players()
+    if season_data is None:
+        _, season_data = load_session_season()
+    if season_data and season_data.get("players"):
+        lookup = league_lookup(season_data)
+        return cache_data, list(lookup.values())
+    return cache_data, all_players
+
+
+def _team_context(all_players, team_id, season_data=None):
+    if season_data and season_data.get("rosters"):
+        roster = roster_players(season_data, team_id)
+        team_name_value = roster[0].get("team") if roster else None
+        if not team_name_value:
+            standing = season_data.get("standings", {}).get(str(team_id), {})
+            team_name_value = standing.get("team_name", "Unknown Team")
+    else:
+        roster = [player for player in all_players if player.get("team_id") == team_id]
+        team_name_value = roster[0].get("team") if roster else "Unknown Team"
+
     team_summaries = build_team_summaries(all_players)
-    team_ranks = compute_team_ranks(team_summaries)
-    team_name = roster[0].get("team") if roster else "Unknown Team"
+
+    team_gp = None
+    if season_data and season_data.get("standings"):
+        team_gp = season_data["standings"].get(str(team_id), {}).get("gp")
 
     return {
         "roster": roster,
-        "team_name": team_name,
-        "team_overall": compute_team_overall(roster),
-        "team_rank": team_ranks.get(team_id, {}).get("overall"),
+        "team_name": team_name_value,
+        "team_overall": compute_team_overall(roster, team_gp=team_gp),
+        "team_rank": compute_team_ranks(team_summaries).get(team_id, {}).get("overall"),
     }
 
 
@@ -152,7 +227,13 @@ def _known_team_ids(all_players):
 
 @app.context_processor
 def inject_game():
-    return {"game": get_game()}
+    _, season_data = load_session_season()
+    return {
+        "game": get_game(),
+        "active_season": season_data,
+        "positions_label": positions_label,
+        "max_roster": MAX_ROSTER,
+    }
 
 
 @app.route("/")
@@ -161,8 +242,9 @@ def index():
     if game is None:
         return render_template("landing.html", page_title="NBA Manager")
 
-    cache_data, all_players = _load_players()
-    team_info = _team_context(all_players, game["team_id"])
+    cache_data, all_players = _active_players()
+    _, season_data = load_session_season()
+    team_info = _team_context(all_players, game["team_id"], season_data)
     roster = _sort_players(team_info["roster"], "overall", "desc")
     top_players = roster[:3]
 
@@ -199,8 +281,9 @@ def team():
 
     game = get_game()
     sort_key, order = _parse_sort_order("overall", "desc", ROSTER_SORT_COLUMNS)
-    cache_data, all_players = _load_players()
-    team_info = _team_context(all_players, game["team_id"])
+    cache_data, all_players = _active_players()
+    _, season_data = load_session_season()
+    team_info = _team_context(all_players, game["team_id"], season_data)
     stat_ranks = compute_stat_ranks(all_players)
     roster = _sort_players(team_info["roster"], sort_key, order)
     _attach_roster_ranks(roster, stat_ranks)
@@ -217,14 +300,93 @@ def team():
         team_overall=team_info["team_overall"],
         team_rank=team_info["team_rank"],
         roster=roster,
+        roster_size=len(roster),
+        max_roster=MAX_ROSTER,
+        can_release=season_data is not None and can_trade(season_data) and can_remove_player(season_data, game["team_id"]),
         sort=sort_key,
         order=order,
         next_order=_next_order,
         make_team_url=make_team_url,
         stat_columns=STAT_COLUMNS,
         stat_labels=STAT_LABELS,
+        positions_label=positions_label,
         last_updated=cache_data.get("last_updated"),
     )
+
+
+@app.route("/team/release/<int:player_id>", methods=["POST"])
+def team_release(player_id):
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    season_id, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("team"))
+
+    ok, message = release_player(season_data, game["team_id"], player_id)
+    if ok:
+        save_session_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("team"))
+
+
+@app.route("/free-agency")
+def free_agency():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    season_id, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    sort_key, order = _parse_sort_order("overall", "desc", ROSTER_SORT_COLUMNS)
+    lookup = league_lookup(season_data)
+    agents = _sort_players(free_agent_players(season_data, lookup), sort_key, order)
+    user_roster_count = roster_size(season_data, game["team_id"])
+
+    def make_fa_url(**overrides):
+        params = {"sort": sort_key, "order": order}
+        params.update(overrides)
+        return url_for("free_agency", **params)
+
+    return render_template(
+        "free_agency.html",
+        page_title="Free Agency",
+        free_agents=agents,
+        can_sign=can_trade(season_data) and user_roster_count < MAX_ROSTER,
+        roster_size=user_roster_count,
+        max_roster=MAX_ROSTER,
+        sort=sort_key,
+        order=order,
+        next_order=_next_order,
+        make_fa_url=make_fa_url,
+        positions_label=positions_label,
+    )
+
+
+@app.route("/free-agency/sign/<int:player_id>", methods=["POST"])
+def free_agency_sign(player_id):
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    season_id, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("free_agency"))
+
+    ok, message = sign_free_agent(season_data, game["team_id"], player_id)
+    if ok:
+        save_session_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("free_agency"))
 
 
 @app.route("/trade")
@@ -233,11 +395,154 @@ def trade():
     if redirect_response is not None:
         return redirect_response
 
-    return render_template(
-        "index.html",
-        page_title="Trade Engine",
-        content="Trade Engine — coming soon",
+    game = get_game()
+    _, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first to trade.")
+        return redirect(url_for("season_hub"))
+
+    partner_raw = request.args.get("partner", "").strip()
+    partner_id = None
+    if partner_raw.isdigit():
+        partner_id = int(partner_raw)
+
+    user_team_id = game["team_id"]
+    lookup = league_lookup(season_data)
+    user_roster = sorted(
+        roster_players(season_data, user_team_id, lookup),
+        key=lambda player: player.get("overall") or 0,
+        reverse=True,
     )
+    user_picks = team_picks(season_data, user_team_id)
+    teams = other_teams(season_data, user_team_id)
+
+    partner_roster = []
+    partner_picks = []
+    partner_name = None
+    if partner_id is not None:
+        partner_roster = sorted(
+            roster_players(season_data, partner_id, lookup),
+            key=lambda player: player.get("overall") or 0,
+            reverse=True,
+        )
+        partner_picks = team_picks(season_data, partner_id)
+        partner_name = season_data.get("standings", {}).get(str(partner_id), {}).get(
+            "team_name", str(partner_id)
+        )
+
+    return render_template(
+        "trade.html",
+        page_title="Trade Engine",
+        season=season_data,
+        can_trade=can_trade(season_data),
+        trade_message=trade_window_message(season_data),
+        user_roster=user_roster,
+        user_picks=user_picks,
+        teams=teams,
+        partner_id=partner_id,
+        partner_name=partner_name,
+        partner_roster=partner_roster,
+        partner_picks=partner_picks,
+        trades=season_data.get("trades", [])[-10:],
+        user_roster_size=roster_size(season_data, user_team_id),
+        max_roster=MAX_ROSTER,
+    )
+
+
+@app.route("/trade/propose", methods=["POST"])
+def trade_propose():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    season_id, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    partner_raw = request.form.get("partner_id", "").strip()
+    if not partner_raw.isdigit():
+        flash("Select a trade partner.")
+        return redirect(url_for("trade"))
+
+    partner_id = int(partner_raw)
+    outgoing_players = request.form.getlist("outgoing_players")
+    outgoing_picks = request.form.getlist("outgoing_picks")
+    incoming_players = request.form.getlist("incoming_players")
+    incoming_picks = request.form.getlist("incoming_picks")
+
+    valid, message = validate_trade(
+        season_data,
+        game["team_id"],
+        partner_id,
+        outgoing_players,
+        outgoing_picks,
+        incoming_players,
+        incoming_picks,
+    )
+    if not valid:
+        flash(message)
+        return redirect(url_for("trade", partner=partner_id))
+
+    if not cpu_accepts_trade(
+        season_data,
+        game["team_id"],
+        partner_id,
+        outgoing_players,
+        outgoing_picks,
+        incoming_players,
+        incoming_picks,
+    ):
+        flash("Trade rejected — value too far apart.")
+        return redirect(url_for("trade", partner=partner_id))
+
+    ok, message = execute_trade(
+        season_data,
+        game["team_id"],
+        partner_id,
+        outgoing_players,
+        outgoing_picks,
+        incoming_players,
+        incoming_picks,
+    )
+    _save_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("trade", partner=partner_id))
+
+
+@app.route("/trade/evaluate", methods=["POST"])
+def trade_evaluate():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, season_data = load_session_season()
+    if season_data is None:
+        return jsonify({"error": "Start a season first."}), 400
+
+    payload = request.get_json(silent=True) or {}
+    partner_raw = str(payload.get("partner_id", "")).strip()
+    if not partner_raw.isdigit():
+        return jsonify({"error": "Select a trade partner."}), 400
+
+    partner_id = int(partner_raw)
+    outgoing_players = payload.get("outgoing_players") or []
+    outgoing_picks = payload.get("outgoing_picks") or []
+    incoming_players = payload.get("incoming_players") or []
+    incoming_picks = payload.get("incoming_picks") or []
+
+    result = evaluate_trade(
+        season_data,
+        game["team_id"],
+        partner_id,
+        outgoing_players,
+        outgoing_picks,
+        incoming_players,
+        incoming_picks,
+    )
+    return jsonify(result)
 
 
 @app.route("/search")
@@ -250,7 +555,8 @@ def search():
     if view not in VIEW_MODES:
         view = "players"
 
-    cache_data, all_players = _load_players()
+    cache_data, all_players = _active_players()
+    _, season_data = load_session_season()
     game = get_game()
     known_team_ids = _known_team_ids(all_players)
 
@@ -304,7 +610,7 @@ def search():
         return url_for("search", **params)
 
     if view == "roster":
-        team_info = _team_context(all_players, roster_team_id)
+        team_info = _team_context(all_players, roster_team_id, season_data)
         roster = _sort_players(team_info["roster"], sort_key, order)
         _attach_roster_ranks(roster, stat_ranks)
 
@@ -423,8 +729,11 @@ def search():
 
 def _season_context():
     cache_data, all_players = _load_players()
-    lookup = {player["id"]: player for player in all_players}
     season_id, season_data = load_session_season()
+    if season_data and season_data.get("players"):
+        lookup = league_lookup(season_data)
+    else:
+        lookup = {player["id"]: player for player in all_players}
     return cache_data, all_players, lookup, season_id, season_data
 
 
@@ -532,6 +841,33 @@ def season_schedule():
         game,
         page="schedule",
         schedule_day=schedule_day,
+    )
+
+
+@app.route("/season/game/<int:game_id>")
+def season_game_box_score(game_id):
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game_state = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    schedule_game = find_schedule_game(season_data, game_id)
+    if schedule_game is None or not schedule_game.get("played"):
+        flash("Box score not available for that game.")
+        return redirect(url_for("season_schedule"))
+
+    return render_template(
+        "box_score.html",
+        page_title="Box Score",
+        game=schedule_game,
+        home_name=team_name(season_data, schedule_game["home_id"]),
+        away_name=team_name(season_data, schedule_game["away_id"]),
+        user_team_id=game_state["team_id"],
     )
 
 
@@ -648,6 +984,150 @@ def season_sim_playoffs():
 
     _save_season(season_id, season_data)
     return redirect(url_for("season_playoffs"))
+
+
+@app.route("/season/draft", methods=["GET"])
+def season_draft():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    phase = season_data.get("phase")
+    if phase == "complete":
+        return render_template(
+            "draft.html",
+            page_title="Draft",
+            season=season_data,
+            phase=phase,
+            board=None,
+            user_team_id=game["team_id"],
+            positions_label=positions_label,
+        )
+
+    if phase not in {"draft", "offseason"}:
+        flash("Draft is not available yet.")
+        return redirect(url_for("season_hub"))
+
+    board = draft_board_context(season_data, game["team_id"], lookup)
+    for prospect in board.get("prospect_options", []):
+        prospect["upside_tier"] = scouting_upside_tier(prospect)
+    return render_template(
+        "draft.html",
+        page_title="Draft",
+        season=season_data,
+        phase=phase,
+        board=board,
+        user_team_id=game["team_id"],
+        positions_label=positions_label,
+    )
+
+
+@app.route("/season/draft/start", methods=["POST"])
+def season_draft_start():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    if season_data.get("phase") != "complete":
+        flash("Draft can only start after playoffs.")
+        return redirect(url_for("season_draft"))
+
+    start_draft(season_data, lookup)
+    _save_season(season_id, season_data)
+    flash("Draft started.")
+    return redirect(url_for("season_draft"))
+
+
+@app.route("/season/draft/pick", methods=["POST"])
+def season_draft_pick():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None or season_data.get("phase") != "draft":
+        flash("No draft in progress.")
+        return redirect(url_for("season_draft"))
+
+    option_raw = request.form.get("prospect_index", "0").strip()
+    try:
+        option_index = int(option_raw)
+    except ValueError:
+        option_index = 0
+
+    state = season_data.get("draft_state") or {}
+    options = state.get("prospect_options", [])
+    prospect = options[option_index] if 0 <= option_index < len(options) else None
+
+    ok, message = make_pick(season_data, game["team_id"], prospect=prospect)
+    _save_season(season_id, season_data)
+    flash(message if ok else message)
+    return redirect(url_for("season_draft"))
+
+
+@app.route("/season/draft/sim", methods=["POST"])
+def season_draft_sim():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    sim_mode = request.form.get("mode", "to_user")
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None or season_data.get("phase") != "draft":
+        flash("No draft in progress.")
+        return redirect(url_for("season_draft"))
+
+    if sim_mode == "rest":
+        count = sim_rest_of_draft(season_data, auto_user_picks=True)
+        message = f"Simulated {count} picks. Draft complete."
+    else:
+        count = sim_draft_to_user_pick(season_data, game["team_id"])
+        message = f"Simulated {count} CPU picks to your turn."
+
+    _save_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("season_draft"))
+
+
+@app.route("/season/advance", methods=["POST"])
+def season_advance():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    if season_data.get("phase") != "offseason":
+        flash("Complete the draft before advancing.")
+        return redirect(url_for("season_draft"))
+
+    advance_season(season_data)
+    _save_season(season_id, season_data)
+    message = f"Welcome to the {season_data['season_year']} season!"
+    retirements = season_data.get("last_retirements") or []
+    if retirements:
+        names = ", ".join(f"{item['name']} ({item['age']})" for item in retirements[:8])
+        if len(retirements) > 8:
+            names += f", +{len(retirements) - 8} more"
+        message = f"{message} Retired: {names}."
+    flash(message)
+    return redirect(url_for("season_hub"))
 
 
 @app.route("/refresh")

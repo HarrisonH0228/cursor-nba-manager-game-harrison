@@ -2,10 +2,11 @@ import time
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from nba_api.stats.endpoints import commonplayerinfo, leaguedashplayerstats
+from nba_api.stats.endpoints import commonplayerinfo, leaguedashplayerbiostats, leaguedashplayerstats
 from nba_api.stats.static import teams as nba_teams
 
 import cache
+from attributes import apply_attributes, ensure_positions, init_career_profiles, parse_nba_position
 from ratings import apply_ratings
 
 load_dotenv()
@@ -33,12 +34,35 @@ def _fetch_league_player_stats(season_end_year):
     return response.get_normalized_dict().get("LeagueDashPlayerStats", [])
 
 
-def _player_record(row, team_lookup):
+def _fetch_player_positions(season_end_year):
+    time.sleep(REQUEST_DELAY)
+    try:
+        response = leaguedashplayerbiostats.LeagueDashPlayerBioStats(
+            season=season_string(season_end_year),
+            season_type_all_star="Regular Season",
+        )
+        rows = response.get_normalized_dict().get("LeagueDashPlayerBioStats", [])
+    except Exception:
+        return {}
+    positions = {}
+    for row in rows:
+        player_id = row.get("PLAYER_ID")
+        if not player_id:
+            continue
+        parsed = parse_nba_position(row.get("PLAYER_POSITION"))
+        if parsed:
+            positions[player_id] = parsed
+    return positions
+
+
+def _player_record(row, team_lookup, position_lookup=None):
     team_id = row.get("TEAM_ID")
     team_name = team_lookup.get(team_id, row.get("TEAM_ABBREVIATION", "Free Agent"))
+    player_id = row["PLAYER_ID"]
+    positions = (position_lookup or {}).get(player_id)
 
-    return {
-        "id": row["PLAYER_ID"],
+    record = {
+        "id": player_id,
         "name": row["PLAYER_NAME"],
         "team": team_name,
         "team_id": team_id,
@@ -50,6 +74,9 @@ def _player_record(row, team_lookup):
         "gp": row.get("GP"),
         "age": row.get("AGE"),
     }
+    if positions:
+        record["positions"] = positions
+    return record
 
 
 def fetch_teams():
@@ -81,8 +108,9 @@ def refresh_cache():
             raise ValueError("nba_api returned no player stats")
 
         team_lookup = _team_name_by_id()
+        position_lookup = _fetch_player_positions(CURRENT_SEASON)
         records = [
-            _player_record(row, team_lookup)
+            _player_record(row, team_lookup, position_lookup)
             for row in rows
             if (row.get("GP") or 0) > 0
         ]
@@ -90,7 +118,12 @@ def refresh_cache():
         if not records:
             raise ValueError("No players with games played in API response")
 
+        for player in records:
+            ensure_positions(player)
+
         records = apply_ratings(records)
+        records = apply_attributes(records)
+        init_career_profiles(records)
 
         cache.save_cache(
             {

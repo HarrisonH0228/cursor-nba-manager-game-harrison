@@ -9,19 +9,65 @@
             {% if team_overall is not none %}
             Team OVR {{ team_overall }}{% if team_rank %} (#{{ team_rank }}){% endif %}
             {% endif %}
-            · {{ roster|length }} players
+            · {{ roster_size }} / {{ max_roster }} players
         </p>
-        <p class="small text-muted mb-0 mt-1">Top 8 qualified players (20+ GP); top 3 weighted 2.5x; under 40 GP at 1/3 weight</p>
+        <p class="small text-muted mb-0 mt-1">Top 8 qualified players (20+ GP); top 3 weighted 2.5x; after 20 team games, players under 50% team GP count at 1/3 weight</p>
         {% if last_updated %}
         <p class="text-muted mb-0 mt-1">Last updated: {{ last_updated }}</p>
         {% endif %}
     </div>
-    <a href="{{ url_for('search') }}" class="btn btn-outline-secondary">Browse League</a>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="{{ url_for('free_agency') }}" class="btn btn-outline-primary">Free Agency</a>
+        <a href="{{ url_for('search') }}" class="btn btn-outline-secondary">Browse League</a>
+    </div>
 </div>
 
 {% if not roster %}
 <div class="alert alert-warning">No players found on your roster.</div>
 {% else %}
-{{ roster_table(roster, sort, order, make_team_url, next_order) }}
+{% if can_release %}
+<p class="small text-muted">Release players to free agency during the trade window (minimum 10 on roster).</p>
+{% endif %}
+<table class="table table-striped table-hover align-middle">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>OVR</th>
+            <th>Pos</th>
+            <th>Age</th>
+            <th>GP</th>
+            <th>PPG</th>
+            <th>RPG</th>
+            <th>APG</th>
+            <th>SPG</th>
+            <th>BPG</th>
+            {% if can_release %}<th></th>{% endif %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for player in roster %}
+        <tr>
+            <td>{{ player.name }}</td>
+            <td>{{ player.overall if player.overall is not none else '—' }}</td>
+            <td>{{ positions_label(player.positions) }}</td>
+            <td>{{ player.age if player.age is not none else '—' }}</td>
+            <td>{{ player.gp if player.gp is not none else '—' }}</td>
+            <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
+            <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
+            <td>{{ player.apg if player.apg is not none else '—' }}</td>
+            <td>{{ player.spg if player.spg is not none else '—' }}</td>
+            <td>{{ player.bpg if player.bpg is not none else '—' }}</td>
+            {% if can_release %}
+            <td class="text-end">
+                <form method="post" action="{{ url_for('team_release', player_id=player.id) }}" class="d-inline"
+                      onsubmit="return confirm('Release {{ player.name }} to free agency?');">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Release</button>
+                </form>
+            </td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
 {% endif %}
 {% endblock %}

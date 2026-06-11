@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% macro box_score_table(team_name, lines, user_team_id) %}
+<div class="card h-100">
+    <div class="card-header">
+        <h2 class="h6 mb-0">{{ team_name }}</h2>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-striped table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Player</th>
+                    <th>MIN</th>
+                    <th>PTS</th>
+                    <th>REB</th>
+                    <th>AST</th>
+                    <th>STL</th>
+                    <th>BLK</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for line in lines %}
+                <tr>
+                    <td>{{ line.name }}</td>
+                    <td>{{ line.min }}</td>
+                    <td>{{ line.pts }}</td>
+                    <td>{{ line.reb }}</td>
+                    <td>{{ line.ast }}</td>
+                    <td>{{ line.stl }}</td>
+                    <td>{{ line.blk }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="fw-semibold">
+                    <td>Totals</td>
+                    <td>{{ lines|sum(attribute='min') }}</td>
+                    <td>{{ lines|sum(attribute='pts') }}</td>
+                    <td>{{ lines|sum(attribute='reb') }}</td>
+                    <td>{{ lines|sum(attribute='ast') }}</td>
+                    <td>{{ lines|sum(attribute='stl') }}</td>
+                    <td>{{ lines|sum(attribute='blk') }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div>
+        <h1 class="mb-1">Box Score</h1>
+        <p class="text-muted mb-0">
+            Day {{ game.day }}
+            · {{ home_name }} {{ game.home_score }} – {{ game.away_score }} {{ away_name }}
+        </p>
+    </div>
+    <a href="{{ url_for('season_schedule', day=game.day) }}" class="btn btn-outline-secondary">Back to Schedule</a>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        {{ box_score_table(home_name, game.home_box, user_team_id) }}
+    </div>
+    <div class="col-lg-6">
+        {{ box_score_table(away_name, game.away_box, user_team_id) }}
+    </div>
+</div>
+{% endblock %}

@@ -10,11 +10,17 @@ DEFAULT_SEASON = {
     "current_day": 1,
     "max_day": 1,
     "trade_deadline_games": 55,
+    "next_player_id": 9000001,
+    "players": {},
+    "draft_picks": {},
+    "draft_state": None,
+    "trades": [],
     "rosters": {},
     "standings": {},
     "schedule": [],
     "playoffs": None,
     "recent_results": [],
+    "free_agents": [],
 }
 
 
@@ -36,6 +42,10 @@ def load_season(season_id):
 
     for key, value in DEFAULT_SEASON.items():
         data.setdefault(key, value if not isinstance(value, dict) else dict(value))
+
+    from season import migrate_season
+
+    migrate_season(data)
     return data
 
 

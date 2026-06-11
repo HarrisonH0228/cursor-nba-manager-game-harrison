@@ -92,6 +92,16 @@
 </div>
 {% endif %}
 
+{% if season.phase == 'complete' %}
+<div class="mb-4">
+    <a href="{{ url_for('season_draft') }}" class="btn btn-warning">Go to Draft</a>
+</div>
+{% elif season.phase == 'offseason' %}
+<div class="mb-4">
+    <a href="{{ url_for('season_draft') }}" class="btn btn-success">Advance to Next Season</a>
+</div>
+{% endif %}
+
 {% for round in season.playoffs.rounds %}
 {% if round.series %}
 <div class="card mb-3">
@@ -170,12 +180,20 @@
                 <td>{{ game.away_name }}</td>
                 <td>
                     {% if game.played %}
-                    {{ game.home_score }} – {{ game.away_score }}
+                    <a href="{{ url_for('season_game_box_score', game_id=game.id) }}">
+                        {{ game.home_score }} – {{ game.away_score }}
+                    </a>
                     {% else %}
                     —
                     {% endif %}
                 </td>
-                <td>{{ 'Final' if game.played else 'Scheduled' }}</td>
+                <td>
+                    {% if game.played %}
+                    <a href="{{ url_for('season_game_box_score', game_id=game.id) }}">Final</a>
+                    {% else %}
+                    Scheduled
+                    {% endif %}
+                </td>
             </tr>
             {% else %}
             <tr>
@@ -211,7 +229,16 @@
         {% for result in season.recent_results[:8] %}
         <li class="list-group-item">
             Day {{ result.day }}:
+            {% if result.game_id %}
+            <a href="{{ url_for('season_game_box_score', game_id=result.game_id) }}">
+                {{ result.home_name }} {{ result.home_score }} – {{ result.away_score }} {{ result.away_name }}
+            </a>
+            {% else %}
             {{ result.home_name }} {{ result.home_score }} – {{ result.away_score }} {{ result.away_name }}
+            {% endif %}
+            {% if result.top_scorer_name %}
+            <span class="text-muted"> · {{ result.top_scorer_name }} ({{ result.top_scorer_pts }} PTS)</span>
+            {% endif %}
         </li>
         {% endfor %}
     </ul>
@@ -236,6 +263,33 @@
 {% if regular_complete or season.phase == 'regular_complete' %}
 <div class="mt-4">
     <a href="{{ url_for('season_playoffs') }}" class="btn btn-success">Go to Playoffs</a>
+</div>
+{% endif %}
+
+{% if season.phase == 'complete' %}
+<div class="mt-4">
+    <a href="{{ url_for('season_draft') }}" class="btn btn-success">Start Draft</a>
+</div>
+{% elif season.phase == 'draft' %}
+<div class="mt-4">
+    <a href="{{ url_for('season_draft') }}" class="btn btn-primary">Continue Draft</a>
+</div>
+{% elif season.phase == 'offseason' %}
+<div class="mt-4 d-flex flex-wrap gap-2">
+    <a href="{{ url_for('season_draft') }}" class="btn btn-outline-secondary">Draft Summary</a>
+    <form method="post" action="{{ url_for('season_advance') }}">
+        <button type="submit" class="btn btn-success">Advance to Next Season</button>
+    </form>
+</div>
+{% endif %}
+
+{% if season.phase == 'complete' %}
+<div class="mt-4">
+    <a href="{{ url_for('season_draft') }}" class="btn btn-warning">Go to Draft</a>
+</div>
+{% elif season.phase == 'offseason' %}
+<div class="mt-4">
+    <a href="{{ url_for('season_draft') }}" class="btn btn-success">Advance to Next Season</a>
 </div>
 {% endif %}
 {% endif %}

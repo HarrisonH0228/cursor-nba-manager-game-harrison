@@ -1,7 +1,10 @@
+import json
 import random
+import time
 
+from attributes import apply_attributes, apply_season_aging, backfill_career_metadata, ensure_positions, init_career_profile, needs_attributes
 from ratings import compute_team_overall
-from simulation import simulate_game
+from simulation import simulate_game, simulate_game_with_box_score
 
 GAMES_PER_TEAM = 82
 EXTRA_HOME_GAMES = 12
@@ -20,7 +23,7 @@ TEAM_CONFERENCES = {
     1610612754: "East",
     1610612748: "East",
     1610612749: "East",
-    1610612750: "East",
+    1610612750: "West",
     1610612752: "East",
     1610612753: "East",
     1610612755: "East",
@@ -43,14 +46,142 @@ TEAM_CONFERENCES = {
 }
 
 
+NEXT_PLAYER_ID_START = 9000001
+LOTTERY_PICK_COUNT = 14
+PLAYOFF_TEAMS_PER_CONFERENCE = 8
+
+# Approximate NBA lottery odds (per 1000) for the 14 non-playoff teams, worst record first.
+LOTTERY_ODDS = [140, 140, 134, 122, 109, 94, 79, 67, 56, 46, 37, 29, 22, 16]
+
+DEBUG_LOG_PATH = "/Users/harrisonhoggatt/Documents/GitHub/nba-manager-game/.cursor/debug-7efc9a.log"
+
+
+def _debug_log(hypothesis_id, location, message, data=None, run_id="pre-fix"):
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "7efc9a",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload) + "\n")
+    except OSError:
+        pass
+    # #endregion
+
+
+def _schedule_games_per_team(matchups, team_ids):
+    counts = {team_id: 0 for team_id in team_ids}
+    for game in matchups:
+        counts[game["home_id"]] += 1
+        counts[game["away_id"]] += 1
+    return counts
+
+
+def build_player_pool(cache_players, rng=None):
+    rng = rng or random.Random()
+    pool = {}
+    for player in cache_players:
+        player_id = player["id"]
+        entry = dict(player)
+        entry["is_rookie"] = False
+        entry["season_gp"] = 0
+        entry["gp"] = 0
+        ensure_positions(entry)
+        init_career_profile(entry, rng)
+        pool[str(player_id)] = entry
+    return pool
+
+
+def _cap_team_rosters(season, max_size=15):
+    from roster import MAX_ROSTER, release_player
+
+    lookup = league_lookup(season)
+    for team_id_str, roster_ids in list(season.get("rosters", {}).items()):
+        team_id = int(team_id_str)
+        if len(roster_ids) <= max_size:
+            continue
+        players = sorted(
+            [lookup[pid] for pid in roster_ids if pid in lookup],
+            key=lambda player: player.get("overall") or 0,
+            reverse=True,
+        )
+        keep_ids = {player["id"] for player in players[:max_size]}
+        for player_id in list(roster_ids):
+            if player_id not in keep_ids:
+                release_player(season, team_id, player_id)
+
+
+def migrate_season(season, rng=None):
+    rng = rng or random.Random()
+    if "free_agents" not in season:
+        season["free_agents"] = []
+    for player in season.get("players", {}).values():
+        backfill_career_metadata(player, rng)
+    free_agents = []
+    for key, player in season.get("players", {}).items():
+        if not player.get("team_id"):
+            free_agents.append(player.get("id", int(key)))
+    season["free_agents"] = sorted(set(free_agents))
+    return season
+
+
+def league_lookup(season):
+    lookup = {}
+    for key, player in season.get("players", {}).items():
+        player_id = player.get("id", int(key))
+        lookup[player_id] = player
+    return lookup
+
+
+def init_draft_picks(team_ids, year):
+    picks_by_team = {}
+    pick_number = 1
+    for team_id in sorted(team_ids):
+        team_picks = []
+        for round_num in (1, 2, 3):
+            team_picks.append(
+                {
+                    "id": f"pick-{team_id}-{year}-r{round_num}",
+                    "year": year,
+                    "round": round_num,
+                    "overall": pick_number,
+                    "original_team_id": team_id,
+                }
+            )
+            pick_number += 1
+        picks_by_team[str(team_id)] = team_picks
+    return picks_by_team
+
+
+def can_trade(season):
+    phase = season.get("phase", "regular")
+    if phase in {"draft", "offseason"}:
+        return True
+    if phase == "regular":
+        target = season.get("trade_deadline_games", TRADE_DEADLINE_GAMES)
+        return not all_teams_at_gp(season, target)
+    return False
+
+
 def init_season(players, season_year=2026, rng=None):
     rng = rng or random.Random()
 
+    if needs_attributes(players):
+        apply_attributes(players)
+
     team_players = {}
     team_names = {}
+    free_agent_ids = []
     for player in players:
         team_id = player.get("team_id")
         if not team_id:
+            free_agent_ids.append(player["id"])
             continue
         team_players.setdefault(team_id, []).append(player["id"])
         team_names[team_id] = player.get("team", "Unknown")
@@ -66,19 +197,32 @@ def init_season(players, season_year=2026, rng=None):
         }
         for team_id in team_ids
     }
-
-    return {
+    draft_year = season_year + 1
+    player_pool = build_player_pool(players, rng)
+    season = {
         "season_year": season_year,
         "phase": "regular",
         "current_day": 1,
         "max_day": max(game["day"] for game in schedule) if schedule else 1,
         "trade_deadline_games": TRADE_DEADLINE_GAMES,
+        "next_player_id": NEXT_PLAYER_ID_START,
+        "players": player_pool,
+        "free_agents": sorted(set(free_agent_ids)),
+        "draft_picks": init_draft_picks(team_ids, draft_year),
+        "draft_state": None,
+        "trades": [],
         "rosters": {str(team_id): roster for team_id, roster in team_players.items()},
         "standings": standings,
         "schedule": schedule,
         "playoffs": None,
         "recent_results": [],
     }
+    _cap_team_rosters(season)
+    from roster import _sync_free_agents
+
+    _sync_free_agents(season)
+    season["free_agents"] = sorted(set(season.get("free_agents", []) + free_agent_ids))
+    return season
 
 
 def generate_schedule(team_ids, rng=None):
@@ -94,6 +238,17 @@ def generate_schedule(team_ids, rng=None):
 
     rng.shuffle(matchups)
     scheduled = assign_days(matchups, rng)
+    gp_counts = _schedule_games_per_team(scheduled, team_ids)
+    min_gp = min(gp_counts.values())
+    max_gp = max(gp_counts.values())
+    # #region agent log
+    _debug_log(
+        "A",
+        "season.py:generate_schedule",
+        "schedule gp counts",
+        {"min_gp": min_gp, "max_gp": max_gp, "total_games": len(scheduled), "target": GAMES_PER_TEAM},
+    )
+    # #endregion
 
     games = []
     for game_id, game in enumerate(scheduled, start=1):
@@ -112,28 +267,31 @@ def generate_schedule(team_ids, rng=None):
 
 
 def _generate_extra_games(team_ids, rng):
-    home_needed = {team_id: EXTRA_HOME_GAMES for team_id in team_ids}
-    away_needed = {team_id: EXTRA_HOME_GAMES for team_id in team_ids}
-    extra_games = []
+    for _ in range(100):
+        home_needed = {team_id: EXTRA_HOME_GAMES for team_id in team_ids}
+        away_needed = {team_id: EXTRA_HOME_GAMES for team_id in team_ids}
+        extra_games = []
 
-    for _ in range(len(team_ids) * EXTRA_HOME_GAMES):
-        home_options = [team_id for team_id in team_ids if home_needed[team_id] > 0]
-        if not home_options:
-            break
-        home_id = rng.choice(home_options)
-        away_options = [
-            team_id
-            for team_id in team_ids
-            if team_id != home_id and away_needed[team_id] > 0
-        ]
-        if not away_options:
-            break
-        away_id = rng.choice(away_options)
-        extra_games.append({"home_id": home_id, "away_id": away_id})
-        home_needed[home_id] -= 1
-        away_needed[away_id] -= 1
+        while sum(home_needed.values()) > 0:
+            home_options = [team_id for team_id in team_ids if home_needed[team_id] > 0]
+            away_options = [team_id for team_id in team_ids if away_needed[team_id] > 0]
+            valid_pairs = [
+                (home_id, away_id)
+                for home_id in home_options
+                for away_id in away_options
+                if home_id != away_id
+            ]
+            if not valid_pairs:
+                break
+            home_id, away_id = rng.choice(valid_pairs)
+            extra_games.append({"home_id": home_id, "away_id": away_id})
+            home_needed[home_id] -= 1
+            away_needed[away_id] -= 1
 
-    return extra_games
+        if sum(home_needed.values()) == 0:
+            return extra_games
+
+    raise RuntimeError("Failed to generate balanced extra home games for schedule")
 
 
 def assign_days(matchups, rng):
@@ -148,9 +306,220 @@ def players_by_id(players):
     return {player["id"]: player for player in players}
 
 
-def roster_players(season, team_id, lookup):
+def roster_players(season, team_id, lookup=None):
+    if lookup is None:
+        lookup = league_lookup(season)
     roster_ids = season.get("rosters", {}).get(str(team_id), [])
     return [lookup[player_id] for player_id in roster_ids if player_id in lookup]
+
+
+def allocate_player_id(season):
+    player_id = season.get("next_player_id", NEXT_PLAYER_ID_START)
+    season["next_player_id"] = player_id + 1
+    return player_id
+
+
+def _standings_row_sort_key(season, lookup):
+    return lambda row: (
+        row["win_pct"],
+        row["w"],
+        team_ovr_for_tiebreak(season, row["team_id"], lookup),
+    )
+
+
+def _standings_worst_first(season, lookup=None):
+    lookup = lookup or league_lookup(season)
+    rows = standings_table(season)
+    rows.sort(key=_standings_row_sort_key(season, lookup))
+    return list(reversed(rows))
+
+
+def playoff_team_ids(season):
+    playoff_ids = set()
+    for conference in ("East", "West"):
+        for row in standings_table(season, conference=conference)[:PLAYOFF_TEAMS_PER_CONFERENCE]:
+            playoff_ids.add(row["team_id"])
+    return playoff_ids
+
+
+def lottery_team_rows(season, lookup=None):
+    lookup = lookup or league_lookup(season)
+    playoff_ids = playoff_team_ids(season)
+    lottery_rows = [row for row in _standings_worst_first(season, lookup) if row["team_id"] not in playoff_ids]
+    lottery_rows.sort(key=_standings_row_sort_key(season, lookup))
+    return list(reversed(lottery_rows))
+
+
+def _lottery_weights(team_count):
+    if team_count <= len(LOTTERY_ODDS):
+        return LOTTERY_ODDS[:team_count]
+    extra = team_count - len(LOTTERY_ODDS)
+    return LOTTERY_ODDS + [8] * extra
+
+
+def _playoff_exit_tiers(season):
+    playoffs = season.get("playoffs") or {}
+    tiers = {}
+    for round_index, round_data in enumerate(playoffs.get("rounds", [])):
+        for series in round_data.get("series", []):
+            if not series.get("complete"):
+                continue
+            if series["winner_id"] == series["high_seed_id"]:
+                loser_id = series["low_seed_id"]
+            else:
+                loser_id = series["high_seed_id"]
+            tiers[loser_id] = max(tiers.get(loser_id, 0), round_index + 1)
+
+    champion_id = playoffs.get("champion_id")
+    if champion_id:
+        tiers[champion_id] = len(playoffs.get("rounds", [])) + 1
+    return tiers
+
+
+def playoff_finish_rows(season, lookup=None):
+    lookup = lookup or league_lookup(season)
+    playoff_ids = playoff_team_ids(season)
+    if not playoff_ids:
+        return []
+
+    rows_by_id = {row["team_id"]: row for row in standings_table(season)}
+    exit_tiers = _playoff_exit_tiers(season)
+    playoff_rows = [rows_by_id[team_id] for team_id in playoff_ids if team_id in rows_by_id]
+    playoff_rows.sort(
+        key=lambda row: (
+            exit_tiers.get(row["team_id"], 0),
+            row["win_pct"],
+            row["w"],
+            team_ovr_for_tiebreak(season, row["team_id"], lookup),
+        )
+    )
+    return playoff_rows
+
+
+def run_draft_lottery(season, lookup=None, rng=None):
+    lookup = lookup or league_lookup(season)
+    rng = rng or random.Random()
+    lottery_rows = lottery_team_rows(season, lookup)
+    if not lottery_rows:
+        lottery_rows = _standings_worst_first(season, lookup)[:LOTTERY_PICK_COUNT]
+
+    base_weights = _lottery_weights(len(lottery_rows))
+    weight_by_team = {
+        row["team_id"]: base_weights[index]
+        for index, row in enumerate(lottery_rows)
+    }
+    remaining = list(lottery_rows)
+    lottery_winners = []
+
+    for pick_number in range(1, min(LOTTERY_PICK_COUNT, len(remaining)) + 1):
+        weights = [weight_by_team[row["team_id"]] for row in remaining]
+        chosen = rng.choices(remaining, weights=weights, k=1)[0]
+        lottery_winners.append(
+            {
+                "pick_number": pick_number,
+                "team_id": chosen["team_id"],
+                "team_name": chosen["team_name"],
+            }
+        )
+        remaining.remove(chosen)
+
+    playoff_rows = playoff_finish_rows(season, lookup)
+    playoff_start = len(lottery_winners) + 1
+    playoff_order = [
+        {
+            "pick_number": playoff_start + index,
+            "team_id": row["team_id"],
+            "team_name": row["team_name"],
+        }
+        for index, row in enumerate(playoff_rows)
+    ]
+
+    round1_rows = [
+        {"team_id": entry["team_id"], "team_name": entry["team_name"]}
+        for entry in lottery_winners
+    ]
+    round1_rows.extend(
+        {"team_id": entry["team_id"], "team_name": entry["team_name"]}
+        for entry in playoff_order
+    )
+
+    if len(round1_rows) < len(season.get("rosters", {})):
+        seen_ids = {row["team_id"] for row in round1_rows}
+        for row in _standings_worst_first(season, lookup):
+            if row["team_id"] in seen_ids:
+                continue
+            round1_rows.append({"team_id": row["team_id"], "team_name": row["team_name"]})
+            seen_ids.add(row["team_id"])
+            if len(round1_rows) >= len(season.get("rosters", {})):
+                break
+
+    return {
+        "lottery_order": lottery_winners,
+        "playoff_order": playoff_order,
+        "round1_team_order": round1_rows,
+    }
+
+
+def draft_order(season, lookup=None, rng=None):
+    lookup = lookup or league_lookup(season)
+    lottery_result = run_draft_lottery(season, lookup, rng=rng)
+    round1_order = lottery_result["round1_team_order"]
+    team_count = len(round1_order)
+    order = []
+    for round_num in (1, 2, 3):
+        for index, row in enumerate(round1_order, start=1):
+            order.append(
+                {
+                    "pick_number": (round_num - 1) * team_count + index,
+                    "round": round_num,
+                    "team_id": row["team_id"],
+                    "team_name": row["team_name"],
+                }
+            )
+    lottery_result["queue"] = order
+    return lottery_result
+
+
+def advance_season(season, rng=None):
+    rng = rng or random.Random()
+    retirements = apply_season_aging(season, rng)
+    team_ids = [int(team_id) for team_id in season.get("rosters", {}).keys()]
+    team_names = {
+        int(team_id): record.get("team_name", str(team_id))
+        for team_id, record in season.get("standings", {}).items()
+    }
+
+    season_year = season.get("season_year", 2026) + 1
+    schedule = generate_schedule(team_ids, rng)
+    standings = {
+        str(team_id): {
+            "w": 0,
+            "l": 0,
+            "gp": 0,
+            "team_name": team_names.get(team_id, str(team_id)),
+        }
+        for team_id in team_ids
+    }
+
+    season.update(
+        {
+            "season_year": season_year,
+            "phase": "regular",
+            "current_day": 1,
+            "max_day": max(game["day"] for game in schedule) if schedule else 1,
+            "schedule": schedule,
+            "standings": standings,
+            "playoffs": None,
+            "recent_results": [],
+            "draft_state": None,
+            "draft_picks": init_draft_picks(team_ids, season_year + 1),
+            "last_retirements": retirements,
+        }
+    )
+    for player in season.get("players", {}).values():
+        player["season_gp"] = 0
+        player["gp"] = 0
+    return season
 
 
 def team_name(season, team_id):
@@ -196,11 +565,20 @@ def regular_season_complete(season):
     return all_teams_at_gp(season, GAMES_PER_TEAM)
 
 
-def _record_result(season, game, home_score, away_score):
+def all_schedule_games_played(season):
+    schedule = season.get("schedule", [])
+    return bool(schedule) and all(game["played"] for game in schedule)
+
+
+def _record_result(season, game, result):
     home_id = game["home_id"]
     away_id = game["away_id"]
+    home_score = result["home_score"]
+    away_score = result["away_score"]
     game["home_score"] = home_score
     game["away_score"] = away_score
+    game["home_box"] = result["home_box"]
+    game["away_box"] = result["away_box"]
     game["played"] = True
 
     home_record = season["standings"][str(home_id)]
@@ -216,16 +594,38 @@ def _record_result(season, game, home_score, away_score):
     home_record["gp"] += 1
     away_record["gp"] += 1
 
+    players = season.get("players", {})
+    for line in result["home_box"]:
+        if line.get("min", 0) <= 0:
+            continue
+        player = players.get(str(line["player_id"]))
+        if player is not None:
+            player["season_gp"] = int(player.get("season_gp") or 0) + 1
+            player["gp"] = int(player.get("gp") or 0) + 1
+    for line in result["away_box"]:
+        if line.get("min", 0) <= 0:
+            continue
+        player = players.get(str(line["player_id"]))
+        if player is not None:
+            player["season_gp"] = int(player.get("season_gp") or 0) + 1
+            player["gp"] = int(player.get("gp") or 0) + 1
+
+    all_lines = result["home_box"] + result["away_box"]
+    top_scorer = max(all_lines, key=lambda line: line["pts"]) if all_lines else None
+
     season["recent_results"].insert(
         0,
         {
             "day": game["day"],
+            "game_id": game["id"],
             "home_id": home_id,
             "away_id": away_id,
             "home_name": home_record["team_name"],
             "away_name": away_record["team_name"],
             "home_score": home_score,
             "away_score": away_score,
+            "top_scorer_name": top_scorer["name"] if top_scorer else None,
+            "top_scorer_pts": top_scorer["pts"] if top_scorer else None,
         },
     )
     season["recent_results"] = season["recent_results"][:20]
@@ -234,8 +634,16 @@ def _record_result(season, game, home_score, away_score):
 def _play_game(season, game, lookup, rng):
     home_roster = roster_players(season, game["home_id"], lookup)
     away_roster = roster_players(season, game["away_id"], lookup)
-    home_score, away_score = simulate_game(home_roster, away_roster, rng)
-    _record_result(season, game, home_score, away_score)
+    home_gp = season["standings"][str(game["home_id"])].get("gp", 0)
+    away_gp = season["standings"][str(game["away_id"])].get("gp", 0)
+    result = simulate_game_with_box_score(
+        home_roster,
+        away_roster,
+        rng,
+        home_team_gp=home_gp,
+        away_team_gp=away_gp,
+    )
+    _record_result(season, game, result)
     return game
 
 
@@ -274,9 +682,46 @@ def sim_rest_of_season(season, lookup, rng=None):
             continue
         _play_game(season, game, lookup, rng)
         games_played += 1
-    season["current_day"] = season.get("max_day", 1) + 1
-    if regular_season_complete(season):
+
+    gp_values = [record.get("gp", 0) for record in season.get("standings", {}).values()]
+    all_played = all_schedule_games_played(season)
+    complete = regular_season_complete(season)
+    # #region agent log
+    _debug_log(
+        "ABC",
+        "season.py:sim_rest_of_season",
+        "post sim state",
+        {
+            "games_played": games_played,
+            "all_schedule_played": all_played,
+            "regular_complete": complete,
+            "min_gp": min(gp_values) if gp_values else None,
+            "max_gp": max(gp_values) if gp_values else None,
+            "current_day_before": season.get("current_day"),
+            "max_day": season.get("max_day"),
+            "phase_before": season.get("phase"),
+        },
+    )
+    # #endregion
+
+    if complete or all_played:
         season["phase"] = "regular_complete"
+        season["current_day"] = season.get("max_day", 1)
+    else:
+        season["current_day"] = season.get("max_day", 1) + 1
+
+    # #region agent log
+    _debug_log(
+        "C",
+        "season.py:sim_rest_of_season",
+        "final season state",
+        {
+            "phase": season.get("phase"),
+            "current_day": season.get("current_day"),
+            "max_day": season.get("max_day"),
+        },
+    )
+    # #endregion
     return games_played
 
 
@@ -329,7 +774,8 @@ def sim_to_trade_deadline(season, lookup, rng=None):
 
 def team_ovr_for_tiebreak(season, team_id, lookup):
     roster = roster_players(season, team_id, lookup)
-    return compute_team_overall(roster) or 0
+    team_gp = season.get("standings", {}).get(str(team_id), {}).get("gp")
+    return compute_team_overall(roster, team_gp=team_gp) or 0
 
 
 def seed_playoffs(season, lookup):
@@ -528,3 +974,10 @@ def enrich_game_for_display(game, season):
         "home_name": team_name(season, game["home_id"]),
         "away_name": team_name(season, game["away_id"]),
     }
+
+
+def find_schedule_game(season, game_id):
+    for game in season.get("schedule", []):
+        if game.get("id") == game_id:
+            return game
+    return None

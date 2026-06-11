@@ -28,12 +28,22 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('trade') }}">Trade</a>
                     </li>
+                    {% if active_season %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('free_agency') }}">Free Agency</a>
+                    </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('search') }}">Search</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('season_hub') }}">Season</a>
                     </li>
+                    {% if active_season and active_season.phase in ['complete', 'draft', 'offseason'] %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('season_draft') }}">Draft</a>
+                    </li>
+                    {% endif %}
                     <li class="nav-item ms-lg-2">
                         <form method="post" action="{{ url_for('new_game') }}" class="d-inline"
                               onsubmit="return confirm('Start a new game? Your current team assignment will be lost.');">

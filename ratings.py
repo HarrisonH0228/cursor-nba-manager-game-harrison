@@ -12,6 +12,16 @@ STAT_LABELS = {
     "overall": "OVR",
 }
 
+ATTR_OVERALL_WEIGHTS = {
+    "scoring": 3.0,
+    "playmaking": 1.5,
+    "rebounding": 1.5,
+    "defense": 2.0,
+    "efficiency": 1.0,
+}
+MIN_INTRINSIC_OVERALL = 25
+MAX_INTRINSIC_OVERALL = 99
+
 
 def rating_pool(players):
     return [player for player in players if (player.get("gp") or 0) >= MIN_GAMES_FOR_RATINGS]
@@ -92,6 +102,25 @@ def apply_ratings(players):
     return players
 
 
+def compute_intrinsic_overall(player):
+    """Absolute OVR from effective attributes (not league-relative percentiles)."""
+    from attributes import effective_attributes
+
+    attrs = player.get("attributes") or effective_attributes(player)
+    weighted_sum = 0.0
+    weight_total = 0.0
+    for key, weight in ATTR_OVERALL_WEIGHTS.items():
+        value = attrs.get(key)
+        if value is None:
+            continue
+        weighted_sum += weight * value
+        weight_total += weight
+    if weight_total <= 0:
+        return player.get("overall") or 50
+    raw = weighted_sum / weight_total
+    return round(max(MIN_INTRINSIC_OVERALL, min(MAX_INTRINSIC_OVERALL, raw)), 1)
+
+
 def needs_ratings(players):
     return any(player.get("overall") is None for player in players) or any(
         player.get("gp") is None for player in players
@@ -104,24 +133,48 @@ TOP_PLAYER_COUNT = 3
 DEPTH_PLAYER_WEIGHT = 0.75
 MIN_GAMES_FOR_TEAM_OVERALL = MIN_GAMES_FOR_RATINGS
 MIN_QUALIFIED_PLAYERS_FOR_TEAM_OVERALL = 5
-PARTIAL_GP_THRESHOLD = 40
+TEAM_GP_PENALTY_START = 20
+PARTICIPATION_GP_RATIO = 0.5
 PARTIAL_WEIGHT_MULTIPLIER = 1 / 3
 
 
-def team_rating_pool(team_players):
+def _resolve_team_gp(team_players, team_gp=None):
+    if team_gp is not None:
+        return team_gp
+    if not team_players:
+        return 0
+    return max(player.get("gp") or 0 for player in team_players)
+
+
+def _player_effective_gp(player, team_gp=None):
+    season_gp = player.get("season_gp")
+    if season_gp is not None and team_gp is not None and team_gp > 0:
+        return season_gp
+    return player.get("gp") or 0
+
+
+def _player_meets_participation(player, team_gp):
+    if team_gp is None or team_gp <= TEAM_GP_PENALTY_START:
+        return True
+    return _player_effective_gp(player, team_gp) >= team_gp * PARTICIPATION_GP_RATIO
+
+
+def team_rating_pool(team_players, team_gp=None):
+    team_gp = _resolve_team_gp(team_players, team_gp)
     return sorted(
         [
             player
             for player in team_players
             if player.get("overall") is not None
-            and (player.get("gp") or 0) >= MIN_GAMES_FOR_TEAM_OVERALL
+            and _player_effective_gp(player, team_gp) >= MIN_GAMES_FOR_TEAM_OVERALL
         ],
         key=lambda player: player["overall"],
         reverse=True,
     )
 
 
-def build_team_top_players(pool):
+def build_team_top_players(pool, team_gp=None):
+    team_gp = _resolve_team_gp(pool, team_gp)
     if len(pool) < MIN_QUALIFIED_PLAYERS_FOR_TEAM_OVERALL:
         return []
 
@@ -132,14 +185,14 @@ def build_team_top_players(pool):
     while changed:
         changed = False
         for index, player in enumerate(list(selected)):
-            if (player.get("gp") or 0) >= PARTIAL_GP_THRESHOLD:
+            if _player_meets_participation(player, team_gp):
                 continue
 
             replacement = None
             for candidate in pool:
                 if candidate["id"] in selected_ids:
                     continue
-                if (candidate.get("gp") or 0) < PARTIAL_GP_THRESHOLD:
+                if not _player_meets_participation(candidate, team_gp):
                     continue
                 if replacement is None or candidate["overall"] > replacement["overall"]:
                     replacement = candidate
@@ -157,25 +210,26 @@ def build_team_top_players(pool):
     return top_players[:TOP_PLAYERS_FOR_TEAM_OVERALL]
 
 
-def _team_overall_weight(index, player):
+def _team_overall_weight(index, player, team_gp=None):
     weight = TOP_PLAYER_WEIGHT if index < TOP_PLAYER_COUNT else DEPTH_PLAYER_WEIGHT
-    if (player.get("gp") or 0) < PARTIAL_GP_THRESHOLD:
+    if not _player_meets_participation(player, team_gp):
         weight *= PARTIAL_WEIGHT_MULTIPLIER
     return weight
 
 
-def compute_team_overall(team_players):
-    pool = team_rating_pool(team_players)
-    top_players = build_team_top_players(pool)
+def compute_team_overall(team_players, team_gp=None):
+    team_gp = _resolve_team_gp(team_players, team_gp)
+    pool = team_rating_pool(team_players, team_gp)
+    top_players = build_team_top_players(pool, team_gp)
     if len(top_players) < MIN_QUALIFIED_PLAYERS_FOR_TEAM_OVERALL:
         return None
 
     weighted_sum = sum(
-        player["overall"] * _team_overall_weight(index, player)
+        player["overall"] * _team_overall_weight(index, player, team_gp)
         for index, player in enumerate(top_players)
     )
     weight_total = sum(
-        _team_overall_weight(index, player) for index, player in enumerate(top_players)
+        _team_overall_weight(index, player, team_gp) for index, player in enumerate(top_players)
     )
     if weight_total <= 0:
         return None

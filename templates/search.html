@@ -185,7 +185,7 @@
     </div>
 </div>
 
-{{ roster_table(roster, sort, order, make_search_url, next_order) }}
+{{ roster_table(roster, sort, order, make_search_url, next_order, positions_label=positions_label) }}
 
 {% else %}
 {% if not last_updated and not teams %}
