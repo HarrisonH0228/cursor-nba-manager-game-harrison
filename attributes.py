@@ -15,7 +15,16 @@ MIN_ATTR = 25
 MAX_ATTR = 99
 TEAM_MINUTES = 240
 ROTATION_SIZE = 8
-GAME_NOISE_STDEV = 0.40
+MIN_STARTERS = 5
+GAME_NOISE_STDEV = 0.18
+PERFORMANCE_FACTOR_LOW = 0.85
+PERFORMANCE_FACTOR_HIGH = 1.15
+PPG_CURVE_EXPONENT = 1.45
+PPG_CURVE_SCALE = 38.0
+STAT_MODIFIER_LOW = 0.68
+STAT_MODIFIER_HIGH = 1.32
+GAME_PTS_SOFT_CAP = 45
+GAME_PTS_HARD_CAP = 55
 LEAGUE_SKILL_SCALE = 0.88
 CAREER_START_AGE = 19
 CAREER_START_MULTIPLIER = 0.78
@@ -56,15 +65,69 @@ STAT_FROM_ATTR = {
 }
 
 STAT_DISPLAY_CAPS = {
-    "ppg": 24.0,
-    "rpg": 14.0,
-    "apg": 11.0,
+    "ppg": 36.0,
+    "rpg": 16.0,
+    "apg": 12.0,
     "spg": 3.5,
-    "bpg": 4.0,
+    "bpg": 4.5,
 }
 
 ATTR_BIAS_MIN = 0.90
 ATTR_BIAS_MAX = 1.10
+
+
+def _clamp_stat(value, stat):
+    cap = STAT_DISPLAY_CAPS.get(stat)
+    if cap is not None:
+        value = min(value, cap)
+    return max(0, round(value, 1))
+
+
+def role_factor_from_rank(rank, roster_size=15):
+    """Usage multiplier by roster rank (1 = top option)."""
+    rank = max(1, int(rank))
+    roster_size = max(rank, int(roster_size))
+    if rank <= 2:
+        return 1.0
+    if rank <= 5:
+        return 0.88 - (rank - 3) * 0.06
+    if rank <= 8:
+        return 0.72 - (rank - 6) * 0.05
+    if rank <= 12:
+        return 0.52 - (rank - 9) * 0.04
+    return max(0.30, 0.38 - (rank - 13) * 0.03)
+
+
+def roster_role_ranks(team_roster):
+    """Map player_id -> rotation rank (1 = highest OVR on team)."""
+    ordered = sorted(
+        team_roster,
+        key=lambda player: player.get("overall") or 0,
+        reverse=True,
+    )
+    return {player["id"]: index + 1 for index, player in enumerate(ordered)}
+
+
+def _nonlinear_stat_value(attr_key, attr_value, stat, scale):
+    normalized = max(MIN_ATTR, min(MAX_ATTR, attr_value)) / 100.0
+    if stat == "ppg":
+        return (normalized ** PPG_CURVE_EXPONENT) * PPG_CURVE_SCALE
+    return attr_value * scale
+
+
+def _compute_stat_line(attributes, player=None, role_rank=None, roster_size=15):
+    multipliers = position_stat_multipliers(ensure_positions(player) if player else [])
+    stat_mods = player.get("stat_modifiers", {}) if player else {}
+    season_form = player.get("season_form", 1.0) if player else 1.0
+    role_scale = role_factor_from_rank(role_rank, roster_size) if role_rank else 1.0
+    stats = {}
+    for stat, (attr_key, scale) in STAT_FROM_ATTR.items():
+        raw = _nonlinear_stat_value(attr_key, attributes[attr_key], stat, scale)
+        value = raw * multipliers.get(stat, 1.0) * stat_mods.get(stat, 1.0) * season_form
+        if stat == "ppg":
+            value *= role_scale
+        stats[stat] = _clamp_stat(value, stat)
+    return stats
 
 
 def _clamp(value, low=MIN_ATTR, high=MAX_ATTR):
@@ -315,35 +378,34 @@ def generate_rookie_attributes(overall, rng=None):
     return generate_rookie_profile(overall, rng)["attributes"]
 
 
-def season_averages_from_attributes(attributes, rng=None, player=None):
+def season_averages_from_attributes(attributes, rng=None, player=None, role_rank=None, roster_size=15):
     if rng is None:
-        return season_averages_from_attributes_deterministic(attributes, player)
-    multipliers = position_stat_multipliers(ensure_positions(player) if player else [])
-    stat_mods = player.get("stat_modifiers", {}) if player else {}
-    stats = {}
-    for stat, (attr_key, scale) in STAT_FROM_ATTR.items():
-        value = attributes[attr_key] * scale * multipliers.get(stat, 1.0) * stat_mods.get(stat, 1.0)
-        value *= rng.uniform(0.92, 1.08)
-        cap = STAT_DISPLAY_CAPS.get(stat)
-        if cap is not None:
-            value = min(value, cap)
-        stats[stat] = round(value, 1)
+        return season_averages_from_attributes_deterministic(
+            attributes, player, role_rank=role_rank, roster_size=roster_size
+        )
+    stats = season_averages_from_attributes_deterministic(
+        attributes, player, role_rank=role_rank, roster_size=roster_size
+    )
+    for stat in stats:
+        stats[stat] = _clamp_stat(stats[stat] * rng.uniform(0.92, 1.08), stat)
     return stats
 
 
-def season_averages_from_attributes_deterministic(attributes, player=None):
-    multipliers = position_stat_multipliers(ensure_positions(player) if player else [])
-    stat_mods = player.get("stat_modifiers", {}) if player else {}
-    season_form = player.get("season_form", 1.0) if player else 1.0
-    stats = {}
-    for stat, (attr_key, scale) in STAT_FROM_ATTR.items():
-        value = attributes[attr_key] * scale * multipliers.get(stat, 1.0) * stat_mods.get(stat, 1.0)
-        value *= season_form
-        cap = STAT_DISPLAY_CAPS.get(stat)
-        if cap is not None:
-            value = min(value, cap)
-        stats[stat] = round(value, 1)
-    return stats
+def season_averages_from_attributes_deterministic(
+    attributes, player=None, role_rank=None, roster_size=15
+):
+    if player and player.get("stats_source") == "nba_cache":
+        cache_stats = player.get("cache_stats") or {}
+        season_form = player.get("season_form", 1.0)
+        stats = {}
+        for stat in STAT_FROM_ATTR:
+            base = cache_stats.get(stat, player.get(stat, 0))
+            value = base * season_form
+            if stat == "ppg" and role_rank:
+                value *= role_factor_from_rank(role_rank, roster_size)
+            stats[stat] = _clamp_stat(value, stat)
+        return stats
+    return _compute_stat_line(attributes, player, role_rank, roster_size)
 
 
 def age_multiplier(age, peak_age=None, decline_rate=DECLINE_RATE):
@@ -441,7 +503,8 @@ def _assign_stat_modifiers(player, rng):
         return
     player_rng = _player_rng(player, rng)
     player["stat_modifiers"] = {
-        stat: round(player_rng.uniform(0.82, 1.18), 3) for stat in STAT_FROM_ATTR
+        stat: round(player_rng.uniform(STAT_MODIFIER_LOW, STAT_MODIFIER_HIGH), 3)
+        for stat in STAT_FROM_ATTR
     }
 
 
@@ -509,9 +572,9 @@ def _apply_development(player, rng):
 def _roll_season_form(rng):
     roll = rng.random()
     if roll < 0.25:
-        return round(rng.uniform(0.82, 0.94), 3)
+        return round(rng.uniform(0.78, 0.90), 3)
     if roll < 0.40:
-        return round(rng.uniform(1.06, 1.15), 3)
+        return round(rng.uniform(1.08, 1.22), 3)
     return round(rng.uniform(0.95, 1.05), 3)
 
 
@@ -599,13 +662,30 @@ def effective_attributes(player):
     return effective
 
 
-def refresh_player_from_attributes(player, effective_attrs=None):
+def refresh_player_from_attributes(player, effective_attrs=None, role_rank=None, roster_size=15):
     if effective_attrs is None:
         effective_attrs = effective_attributes(player)
     player["attributes"] = dict(effective_attrs)
-    stats = season_averages_from_attributes_deterministic(effective_attrs, player)
+    stats = season_averages_from_attributes_deterministic(
+        effective_attrs, player, role_rank=role_rank, roster_size=roster_size
+    )
     player.update(stats)
     return player
+
+
+def refresh_team_roster_stats(team_roster):
+    """Recompute display stats with role-based usage scaling."""
+    if not team_roster:
+        return team_roster
+    ranks = roster_role_ranks(team_roster)
+    roster_size = len(team_roster)
+    for player in team_roster:
+        refresh_player_from_attributes(
+            player,
+            role_rank=ranks.get(player["id"]),
+            roster_size=roster_size,
+        )
+    return team_roster
 
 
 def _remove_player_from_league(season, player_id):
@@ -680,9 +760,22 @@ def init_rookie_career_profile(player, effective_attrs, rng=None, scout_grade=No
 def backfill_career_metadata(player, rng=None):
     """Ensure new career fields exist and refresh display stats."""
     init_career_profile(player, rng)
-    refresh_player_from_attributes(player)
+    if player.get("stats_source") != "nba_cache":
+        refresh_player_from_attributes(player)
     player["overall"] = compute_intrinsic_overall(player)
     return player
+
+
+def mark_nba_cache_stats(player, source_gp=None):
+    """Preserve real NBA averages for veterans with sufficient games."""
+    gp = source_gp if source_gp is not None else (player.get("gp") or 0)
+    if gp >= MIN_GAMES_FOR_RATINGS and not player.get("is_rookie"):
+        player["stats_source"] = "nba_cache"
+        player["cache_stats"] = {
+            stat: player.get(stat, 0) for stat in STAT_FROM_ATTR
+        }
+    elif not player.get("stats_source"):
+        player["stats_source"] = "generated"
 
 
 def get_attributes(player):
@@ -690,6 +783,22 @@ def get_attributes(player):
     if attrs:
         return attrs
     return derive_attributes(player)
+
+
+def _normalize_minutes_to_240(minutes, rotation):
+    if not minutes or not rotation:
+        return minutes
+    ids = [player["id"] for player in rotation if minutes.get(player["id"], 0) > 0]
+    if not ids:
+        return minutes
+    current = sum(minutes[pid] for pid in ids)
+    if current == TEAM_MINUTES:
+        return minutes
+    weights = [max(minutes[pid], 1) for pid in ids]
+    adjusted = _largest_remainder(TEAM_MINUTES, weights)
+    for pid, value in zip(ids, adjusted):
+        minutes[pid] = value
+    return minutes
 
 
 def allocate_minutes(roster, rng=None, exclude_player_ids=None):
@@ -715,20 +824,16 @@ def allocate_minutes(roster, rng=None, exclude_player_ids=None):
     minutes = {}
     for index, (player, weight) in enumerate(zip(rotation, weights)):
         raw = TEAM_MINUTES * weight / total_weight
-        if index < 5:
-            floor = rng.randint(18, 24)
+        if index < MIN_STARTERS:
+            floor = rng.randint(20, 28) if index < 5 else rng.randint(18, 24)
             raw = max(raw, floor)
         else:
             raw = min(max(raw, 8), 22)
-        if rng.random() < 0.12:
-            raw *= rng.uniform(0.75, 0.92)
-        minutes[player["id"]] = round(raw)
+        if rng.random() < 0.08:
+            raw *= rng.uniform(0.80, 0.92)
+        minutes[player["id"]] = int(raw)
 
-    minute_total = sum(minutes.values())
-    if minute_total != TEAM_MINUTES and minutes:
-        diff = TEAM_MINUTES - minute_total
-        top_id = rotation[0]["id"]
-        minutes[top_id] = max(minutes[top_id] + diff, 1)
+    minutes = _normalize_minutes_to_240(minutes, rotation)
 
     for player in roster:
         if player["id"] not in minutes:
@@ -782,6 +887,21 @@ def _team_pace_factor(roster):
     return max(0.88, min(1.14, 0.82 + combined / 120))
 
 
+def _target_team_score(roster, rng, team_gp=None):
+    team_ovr = compute_team_overall(roster, team_gp=team_gp)
+    base = 105 + ((team_ovr or 50) - 50) * 0.35 + rng.uniform(-8, 8)
+    return max(92, min(128, round(base)))
+
+
+def _apply_game_pts_caps(box, rng):
+    for line in box:
+        ovr = line.get("overall") or 50
+        cap = GAME_PTS_HARD_CAP
+        if ovr < 85 and rng.random() > 0.01:
+            cap = GAME_PTS_SOFT_CAP
+        line["pts"] = min(line["pts"], cap)
+
+
 def _project_player_game_stats(player, minutes, rng, performance_factor=1.0):
     effective = get_attributes(player)
     stats = season_averages_from_attributes_deterministic(effective, player)
@@ -800,7 +920,9 @@ def _project_player_game_stats(player, minutes, rng, performance_factor=1.0):
     }
 
 
-def simulate_team_box_score_from_roster(roster, rng, pace_factor=1.0, exclude_player_ids=None):
+def simulate_team_box_score_from_roster(
+    roster, rng, pace_factor=1.0, exclude_player_ids=None, team_gp=None, target_score=None
+):
     exclude_player_ids = exclude_player_ids or set()
     minutes_map = allocate_minutes(roster, rng=rng, exclude_player_ids=exclude_player_ids)
     active = [
@@ -811,43 +933,60 @@ def simulate_team_box_score_from_roster(roster, rng, pace_factor=1.0, exclude_pl
     if not active:
         return [], 0
 
-    performance_factors = {
-        player["id"]: rng.uniform(0.65, 1.35) for player in active
-    }
-    box = []
-    total_pts = 0
-    for player in active:
-        mins = minutes_map[player["id"]]
-        perf = performance_factors[player["id"]]
-        stats = _project_player_game_stats(player, mins, rng, performance_factor=perf)
-        stats["pts"] = max(0, round(stats["pts"] * pace_factor))
-        total_pts += stats["pts"]
-        box.append(
-            {
-                "player_id": player["id"],
-                "name": player.get("name", str(player["id"])),
-                "min": mins,
-                "pts": stats["pts"],
-                "reb": stats["reb"],
-                "ast": stats["ast"],
-                "stl": stats["stl"],
-                "blk": stats["blk"],
-            }
-        )
+    if target_score is None:
+        target_score = _target_team_score(active, rng, team_gp=team_gp)
 
-    box.sort(key=lambda line: line["pts"], reverse=True)
+    box = _build_team_box_score(
+        roster,
+        target_score,
+        rng,
+        minutes_map=minutes_map,
+        exclude_player_ids=exclude_player_ids,
+    )
+    _apply_game_pts_caps(box, rng)
+
+    total_pts = sum(line["pts"] for line in box)
+    if total_pts != target_score and box:
+        diff = target_score - total_pts
+        _adjust_box_score_points(box, diff)
+
+    for line in box:
+        if pace_factor != 1.0:
+            line["pts"] = max(0, round(line["pts"] * pace_factor))
+
+    total_pts = sum(line["pts"] for line in box)
+    box.sort(key=lambda line: line["min"], reverse=True)
     return box, total_pts
 
 
 def _adjust_box_score_points(box, delta):
     if not box or delta == 0:
         return
-    box[0]["pts"] = max(0, box[0]["pts"] + delta)
+    top = box[: min(3, len(box))]
+    weights = [max(line["pts"], 1) for line in top]
+    if delta > 0:
+        shares = _largest_remainder(delta, weights)
+        for line, share in zip(top, shares):
+            line["pts"] += share
+    else:
+        amount = -delta
+        weights = [line["pts"] for line in top]
+        shares = _largest_remainder(amount, weights)
+        for line, share in zip(top, shares):
+            line["pts"] = max(0, line["pts"] - share)
 
 
-def _build_team_box_score(roster, team_score, rng):
-    minutes_map = allocate_minutes(roster)
-    active = [player for player in roster if minutes_map.get(player["id"], 0) > 0]
+def _build_team_box_score(
+    roster, team_score, rng, minutes_map=None, exclude_player_ids=None
+):
+    exclude_player_ids = exclude_player_ids or set()
+    if minutes_map is None:
+        minutes_map = allocate_minutes(roster, rng=rng, exclude_player_ids=exclude_player_ids)
+    active = [
+        player
+        for player in roster
+        if minutes_map.get(player["id"], 0) > 0 and player["id"] not in exclude_player_ids
+    ]
     if not active:
         return []
 
@@ -860,8 +999,11 @@ def _build_team_box_score(roster, team_score, rng):
     for player in active:
         attrs = get_attributes(player)
         mins = minutes_map[player["id"]]
+        ppg_base = player.get("ppg") or season_averages_from_attributes_deterministic(
+            attrs, player
+        ).get("ppg", 10)
         efficiency_factor = 0.75 + attrs["efficiency"] / 200
-        pts_weights.append(_noisy_weight(attrs["scoring"] * mins * efficiency_factor, rng))
+        pts_weights.append(_noisy_weight(ppg_base * mins * efficiency_factor, rng))
         ast_weights.append(_noisy_weight(attrs["playmaking"] * mins, rng))
         reb_weights.append(_noisy_weight(attrs["rebounding"] * mins, rng))
         stl_weights.append(_noisy_weight(attrs["defense"] * mins * 0.4, rng))
@@ -882,6 +1024,7 @@ def _build_team_box_score(roster, team_score, rng):
             {
                 "player_id": player["id"],
                 "name": player.get("name", str(player["id"])),
+                "overall": player.get("overall") or 50,
                 "min": minutes_map[player["id"]],
                 "pts": points[index],
                 "reb": rebounds[index],

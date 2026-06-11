@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <p class="section-title">Admin</p>
+  <h1>Local Admin Panel</h1>
+</div>
+<div class="row g-3">
+  <div class="col-md-4"><a class="btn-nba-primary w-100" href="{{ url_for('admin.admin_players') }}">Players</a></div>
+  <div class="col-md-4"><a class="btn-nba-secondary w-100" href="{{ url_for('admin.admin_create_player') }}">Create Player</a></div>
+  <div class="col-md-4"><a class="btn-nba-secondary w-100" href="{{ url_for('season_hub') }}">Back to Game</a></div>
+</div>
+{% if season %}
+<p class="mt-4" style="color:var(--text-muted);">Active season: {{ season.season_year }} · Phase: {{ season.phase }}</p>
+{% endif %}
+{% endblock %}

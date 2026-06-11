@@ -110,6 +110,36 @@
         </button>
       </div>
     </form>
+    {% if trade_teams %}
+    <div class="mt-4 pt-3" style="border-top:1px solid var(--border);">
+      <h3 style="font-size:.95rem;margin-bottom:.75rem;">Trade Pick for Future Pick</h3>
+      <form method="post" action="{{ url_for('season_draft_trade_pick') }}" class="row g-2 align-items-end">
+        <div class="col-md-4">
+          <label class="form-label" style="font-size:.8rem;">Partner Team</label>
+          <select name="partner_id" class="form-control" required>
+            <option value="">Select team…</option>
+            {% for team in trade_teams %}
+            <option value="{{ team.team_id }}">{{ team.team_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label" style="font-size:.8rem;">Their Future Pick</label>
+          <select name="incoming_future_pick" class="form-control" required>
+            <option value="">Select pick…</option>
+            {% for team in trade_teams %}
+              {% for pick in team.future_picks %}
+              <option value="{{ pick.id }}">{{ team.team_name }} — {{ pick.year }} R{{ pick.round }}</option>
+              {% endfor %}
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <button type="submit" class="btn-nba-secondary w-100">Trade Pick</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
   </div>
 </div>
 {% else %}

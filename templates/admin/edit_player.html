@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Edit {{ player.name }}</h1>
+<form method="post" class="card-nba p-4">
+  <div class="mb-3"><label>Name</label><input class="form-control" name="name" value="{{ player.name }}"></div>
+  <div class="mb-3"><label>Age</label><input class="form-control" name="age" value="{{ player.age or 25 }}"></div>
+  <div class="mb-3"><label>Positions (PG/SG)</label><input class="form-control" name="positions" value="{{ player.positions|join('/') if player.positions else '' }}"></div>
+  {% for key in attribute_keys %}
+  <div class="mb-2"><label>{{ key|title }}</label><input class="form-control" name="attr_{{ key }}" value="{{ player.attributes[key] if player.attributes else '' }}"></div>
+  {% endfor %}
+  <button type="submit" class="btn-nba-primary mt-3">Save</button>
+</form>
+{% endblock %}

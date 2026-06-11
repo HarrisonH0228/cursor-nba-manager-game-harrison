@@ -43,13 +43,15 @@ from draft import (
     sim_rest_of_draft,
     skip_pick,
     start_draft,
+    trade_pick_for_future,
 )
-from injuries import drain_pending_notifications
+from injuries import drain_pending_notifications, user_team_injury_report
 from roster import (
     MAX_ROSTER,
     can_remove_player,
     free_agent_players,
     release_player,
+    repair_roster_sync,
     roster_size,
     sign_free_agent,
 )
@@ -57,6 +59,7 @@ from trade import (
     cpu_accepts_trade,
     evaluate_trade,
     execute_trade,
+    future_team_picks,
     other_teams,
     team_picks,
     trade_window_message,
@@ -73,12 +76,15 @@ from ratings import (
     compute_team_ranks,
     needs_ratings,
 )
+from admin import admin_bp
+from attributes import refresh_team_roster_stats
 from scheduler import start_scheduler
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
+app.register_blueprint(admin_bp)
 
 SORT_COLUMNS = {"name", "team", "overall", "ppg", "rpg", "apg", "spg", "bpg"}
 ROSTER_SORT_COLUMNS = {"name", "overall", "age", "gp", "position", "ppg", "rpg", "apg", "spg", "bpg"}
@@ -285,6 +291,9 @@ def team():
     sort_key, order = _parse_sort_order("overall", "desc", ROSTER_SORT_COLUMNS)
     cache_data, all_players = _active_players()
     _, season_data = load_session_season()
+    if season_data:
+        repair_roster_sync(season_data, game["team_id"])
+        refresh_team_roster_stats(roster_players(season_data, game["team_id"]))
     team_info = _team_context(all_players, game["team_id"], season_data)
     stat_ranks = compute_stat_ranks(all_players)
     roster = _sort_players(team_info["roster"], sort_key, order)
@@ -740,6 +749,9 @@ def _season_context():
 
 
 def _save_season(season_id, season_data):
+    game = get_game()
+    if game and season_data is not None:
+        season_data["user_team_id"] = game["team_id"]
     save_session_season(season_id, season_data)
 
 
@@ -772,6 +784,9 @@ def _render_season(season_id, season_data, lookup, game, page="hub", schedule_da
         east_standings=east_standings,
         west_standings=west_standings,
         user_team_id=game["team_id"],
+        user_injury_report=user_team_injury_report(season_data, game["team_id"], lookup)
+        if season_data
+        else [],
         schedule=schedule,
         schedule_day=schedule_day or (season_data.get("current_day", 1) if season_data else 1),
         games_played=games_played_count(season_data) if season_data else 0,
@@ -801,8 +816,10 @@ def season_start():
         flash("Season already in progress.")
         return redirect(url_for("season_hub"))
 
+    game = get_game()
     season_id = season_store.create_season_id()
     season_data = init_season(all_players, season_year=cache_data.get("season") or 2026)
+    season_data["user_team_id"] = game["team_id"]
     set_season_id(season_id)
     _save_season(season_id, season_data)
     flash("Season started.")
@@ -815,12 +832,13 @@ def season_sim_full():
     if redirect_response is not None:
         return redirect_response
 
-    _, all_players, lookup, season_id, season_data = _season_context()
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
         flash("Start a season first.")
         return redirect(url_for("season_hub"))
 
-    count = sim_rest_of_season(season_data, lookup)
+    count = sim_rest_of_season(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
     _flash_injury_notifications(season_data)
     flash(f"Simulated {count} games. Regular season complete.")
@@ -887,12 +905,13 @@ def season_sim_day():
     if redirect_response is not None:
         return redirect_response
 
+    game = get_game()
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
         flash("Start a season first.")
         return redirect(url_for("season_hub"))
 
-    count = sim_day(season_data, lookup)
+    count = sim_day(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
     _flash_injury_notifications(season_data)
     flash(f"Simulated day {season_data.get('current_day', 1) - 1}: {count} games.")
@@ -905,12 +924,13 @@ def season_sim_week():
     if redirect_response is not None:
         return redirect_response
 
+    game = get_game()
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
         flash("Start a season first.")
         return redirect(url_for("season_hub"))
 
-    count = sim_week(season_data, lookup)
+    count = sim_week(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
     _flash_injury_notifications(season_data)
     flash(f"Simulated one week: {count} games.")
@@ -923,12 +943,13 @@ def season_sim_trade_deadline():
     if redirect_response is not None:
         return redirect_response
 
+    game = get_game()
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
         flash("Start a season first.")
         return redirect(url_for("season_hub"))
 
-    count = sim_to_trade_deadline(season_data, lookup)
+    count = sim_to_trade_deadline(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
     _flash_injury_notifications(season_data)
     flash(f"Simulated to trade deadline (~55 GP): {count} games.")
@@ -1030,6 +1051,11 @@ def season_draft():
     board = draft_board_context(season_data, game["team_id"], lookup)
     for prospect in board.get("prospect_options", []):
         prospect["upside_tier"] = scouting_upside_tier(prospect)
+    trade_teams = []
+    for team in other_teams(season_data, game["team_id"]):
+        future_picks = future_team_picks(season_data, team["team_id"])
+        if future_picks:
+            trade_teams.append({**team, "future_picks": future_picks})
     return render_template(
         "draft.html",
         page_title="Draft",
@@ -1037,6 +1063,7 @@ def season_draft():
         phase=phase,
         board=board,
         user_team_id=game["team_id"],
+        trade_teams=trade_teams,
         positions_label=positions_label,
     )
 
@@ -1105,6 +1132,35 @@ def season_draft_skip():
     ok, message = skip_pick(season_data, game["team_id"])
     _save_season(season_id, season_data)
     flash(message)
+    return redirect(url_for("season_draft"))
+
+
+@app.route("/season/draft/trade-pick", methods=["POST"])
+def season_draft_trade_pick():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None or season_data.get("phase") != "draft":
+        flash("No draft in progress.")
+        return redirect(url_for("season_draft"))
+
+    partner_raw = request.form.get("partner_id", "").strip()
+    incoming_pick = request.form.get("incoming_future_pick", "").strip()
+    if not partner_raw.isdigit() or not incoming_pick:
+        flash("Select a partner and future pick.")
+        return redirect(url_for("season_draft"))
+
+    ok, message = trade_pick_for_future(
+        season_data,
+        game["team_id"],
+        int(partner_raw),
+        incoming_pick,
+    )
+    _save_season(season_id, season_data)
+    flash(message if ok else message)
     return redirect(url_for("season_draft"))
 
 

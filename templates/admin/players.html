@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center">
+  <h1>Players</h1>
+  <a href="{{ url_for('admin.admin_create_player') }}" class="btn-nba-primary">Create</a>
+</div>
+<form class="mb-3" method="get">
+  <input type="text" name="q" value="{{ query }}" placeholder="Search name..." class="form-control">
+</form>
+<table class="table-nba">
+  <thead><tr><th>Name</th><th>OVR</th><th>Team</th><th></th></tr></thead>
+  <tbody>
+    {% for player in players %}
+    <tr>
+      <td>{{ player.name }}</td>
+      <td>{{ player.overall }}</td>
+      <td>{{ player.team or 'FA' }}</td>
+      <td><a href="{{ url_for('admin.admin_edit_player', player_id=player.id) }}">Edit</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

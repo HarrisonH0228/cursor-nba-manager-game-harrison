@@ -1,7 +1,7 @@
 """Trade engine: player and draft pick trades with arcade value model."""
 
 from attributes import age_multiplier
-from roster import validate_roster_sizes_after_trade
+from roster import release_worst_players, roster_size, validate_roster_sizes_after_trade
 from season import can_trade, league_lookup, team_name
 
 TRADE_TOLERANCE = 15
@@ -18,28 +18,34 @@ def player_value(player):
     return overall * age_factor(player.get("age"), player.get("peak_age"))
 
 
-def pick_value(pick, team_count=30):
+def pick_value(pick, team_count=30, current_draft_year=None):
     round_num = pick.get("round", 1)
     base = ROUND_BASE_VALUE.get(round_num, 10)
     overall = pick.get("overall") or 1
     slot = ((overall - 1) % team_count) + 1
     scale = max(0.3, 1.0 - (slot - 1) / max(team_count, 1))
-    return base * scale
+    value = base * scale
+    pick_year = pick.get("year")
+    if current_draft_year and pick_year and pick_year > current_draft_year:
+        value *= 0.80
+    return value
 
 
 def assets_value(season, player_ids, pick_ids, team_id):
     lookup = league_lookup(season)
     total = 0.0
+    draft_year = season.get("season_year", 2026) + 1
     for player_id in player_ids:
         player = lookup.get(int(player_id))
-        if player and player.get("team_id") == team_id:
+        if player and int(player.get("team_id") or -1) == int(team_id):
             total += player_value(player)
-    picks = season.get("draft_picks", {}).get(str(team_id), [])
+    picks = list(season.get("draft_picks", {}).get(str(team_id), []))
+    picks += list(season.get("future_draft_picks", {}).get(str(team_id), []))
     pick_map = {pick["id"]: pick for pick in picks}
     for pick_id in pick_ids:
         pick = pick_map.get(pick_id)
         if pick:
-            total += pick_value(pick)
+            total += pick_value(pick, current_draft_year=draft_year)
     return total
 
 
@@ -91,9 +97,15 @@ def validate_trade(
             return False, "Incoming player not on partner roster."
 
     user_picks = {pick["id"]: pick for pick in season.get("draft_picks", {}).get(str(user_team_id), [])}
+    user_picks.update(
+        {pick["id"]: pick for pick in season.get("future_draft_picks", {}).get(str(user_team_id), [])}
+    )
     partner_picks = {
         pick["id"]: pick for pick in season.get("draft_picks", {}).get(str(partner_team_id), [])
     }
+    partner_picks.update(
+        {pick["id"]: pick for pick in season.get("future_draft_picks", {}).get(str(partner_team_id), [])}
+    )
     for pick_id in outgoing_picks:
         if pick_id not in user_picks:
             return False, "Outgoing pick not owned by your team."
@@ -107,6 +119,7 @@ def validate_trade(
         partner_team_id,
         outgoing_players,
         incoming_players,
+        check_partner_max=False,
     )
     if not ok:
         return False, message
@@ -170,6 +183,16 @@ def execute_trade(
     incoming_players,
     incoming_picks,
 ):
+    lookup = league_lookup(season)
+    partner_size = roster_size(season, partner_team_id)
+    partner_after = partner_size - len(incoming_players) + len(outgoing_players)
+    released_names = []
+    if partner_after > 15:
+        overflow = partner_after - 15
+        release_count = max(2, overflow) if overflow >= 2 else overflow
+        released = release_worst_players(season, partner_team_id, release_count, lookup)
+        released_names = [player.get("name", player["id"]) for player in released]
+
     ok, message = validate_trade(
         season,
         user_team_id,
@@ -182,7 +205,6 @@ def execute_trade(
     if not ok:
         return False, message
 
-    lookup = league_lookup(season)
     user_roster = season["rosters"].setdefault(str(user_team_id), [])
     partner_roster = season["rosters"].setdefault(str(partner_team_id), [])
 
@@ -214,34 +236,55 @@ def execute_trade(
 
     user_pick_list = season["draft_picks"].setdefault(str(user_team_id), [])
     partner_pick_list = season["draft_picks"].setdefault(str(partner_team_id), [])
+    user_future = season.setdefault("future_draft_picks", {}).setdefault(str(user_team_id), [])
+    partner_future = season.setdefault("future_draft_picks", {}).setdefault(str(partner_team_id), [])
+
+    def _find_pick(pick_id, lists):
+        for pick_list in lists:
+            for pick in pick_list:
+                if pick["id"] == pick_id:
+                    return pick, pick_list
+        return None, None
 
     for pick_id in outgoing_picks:
-        pick = next((item for item in user_pick_list if item["id"] == pick_id), None)
+        pick, pick_list = _find_pick(pick_id, [user_pick_list, user_future])
         if pick:
-            user_pick_list.remove(pick)
-            partner_pick_list.append(pick)
+            pick_list.remove(pick)
+            target = partner_future if pick.get("year", 0) > season.get("season_year", 2026) + 1 else partner_pick_list
+            target.append(pick)
 
     for pick_id in incoming_picks:
-        pick = next((item for item in partner_pick_list if item["id"] == pick_id), None)
+        pick, pick_list = _find_pick(pick_id, [partner_pick_list, partner_future])
         if pick:
-            partner_pick_list.remove(pick)
-            user_pick_list.append(pick)
+            pick_list.remove(pick)
+            target = user_future if pick.get("year", 0) > season.get("season_year", 2026) + 1 else user_pick_list
+            target.append(pick)
 
-    season.setdefault("trades", []).append(
-        {
-            "user_team_id": user_team_id,
-            "partner_team_id": partner_team_id,
-            "outgoing_players": [int(player_id) for player_id in outgoing_players],
-            "outgoing_picks": list(outgoing_picks),
-            "incoming_players": [int(player_id) for player_id in incoming_players],
-            "incoming_picks": list(incoming_picks),
-        }
-    )
-    return True, "Trade completed."
+    trade_record = {
+        "user_team_id": user_team_id,
+        "partner_team_id": partner_team_id,
+        "outgoing_players": [int(player_id) for player_id in outgoing_players],
+        "outgoing_picks": list(outgoing_picks),
+        "incoming_players": [int(player_id) for player_id in incoming_players],
+        "incoming_picks": list(incoming_picks),
+    }
+    if released_names:
+        trade_record["partner_released"] = released_names
+    season.setdefault("trades", []).append(trade_record)
+    message = "Trade completed."
+    if released_names:
+        message += f" {team_name(season, partner_team_id)} released {', '.join(released_names)} to make room."
+    return True, message
 
 
 def team_picks(season, team_id):
-    return list(season.get("draft_picks", {}).get(str(team_id), []))
+    current = list(season.get("draft_picks", {}).get(str(team_id), []))
+    future = list(season.get("future_draft_picks", {}).get(str(team_id), []))
+    return current + future
+
+
+def future_team_picks(season, team_id):
+    return list(season.get("future_draft_picks", {}).get(str(team_id), []))
 
 
 def other_teams(season, user_team_id):

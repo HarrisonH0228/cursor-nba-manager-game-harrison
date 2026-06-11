@@ -3,7 +3,7 @@ import random
 
 from attributes import (
     _adjust_box_score_points,
-    _team_pace_factor,
+    _target_team_score,
     simulate_team_box_score_from_roster,
 )
 from ratings import compute_team_defense_rating, compute_team_overall
@@ -12,7 +12,7 @@ HOME_COURT_ADVANTAGE = 2.5
 LOGISTIC_K = 0.12
 OUTCOME_NUDGE_BLEND = 0.12
 OUTCOME_NUDGE_MIN_OVR_GAP = 8
-DEFENSE_SCORE_FACTOR = 0.003
+DEFENSE_SCORE_FACTOR = 0.004
 DEFENSE_WIN_BLEND = 0.20
 
 
@@ -26,26 +26,19 @@ def win_prob(home_ovr, away_ovr, home_def=None, away_def=None):
     return 1 / (1 + math.exp(-LOGISTIC_K * diff))
 
 
+def _defense_target_adjustment(offense_ovr, defense_rating):
+    """Shift target score based on opponent defense before box score build."""
+    league_avg_def = 50
+    def_diff = defense_rating - league_avg_def
+    return -def_diff * DEFENSE_SCORE_FACTOR * 10
+
+
 def _apply_score_adjustment(home_box, away_box, home_delta, away_delta):
     _adjust_box_score_points(home_box, home_delta)
     _adjust_box_score_points(away_box, away_delta)
     home_score = sum(line["pts"] for line in home_box)
     away_score = sum(line["pts"] for line in away_box)
     return home_score, away_score
-
-
-def _apply_defense_modifier(home_box, away_box, home_def, away_def):
-    """Reduce opponent scoring based on defensive rating differential."""
-    def_diff = home_def - away_def
-    away_factor = max(0.85, 1.0 - def_diff * DEFENSE_SCORE_FACTOR)
-    home_factor = max(0.85, 1.0 + def_diff * DEFENSE_SCORE_FACTOR)
-
-    for line in away_box:
-        line["pts"] = max(0, round(line["pts"] * away_factor))
-    for line in home_box:
-        line["pts"] = max(0, round(line["pts"] * home_factor))
-
-    return sum(line["pts"] for line in home_box), sum(line["pts"] for line in away_box)
 
 
 def simulate_game_with_box_score(
@@ -66,17 +59,34 @@ def simulate_game_with_box_score(
     home_def = compute_team_defense_rating(home_roster, team_gp=home_team_gp)
     away_def = compute_team_defense_rating(away_roster, team_gp=away_team_gp)
 
-    home_pace = _team_pace_factor(home_roster)
-    away_pace = _team_pace_factor(away_roster)
+    home_target = _target_team_score(home_roster, rng, team_gp=home_team_gp)
+    away_target = _target_team_score(away_roster, rng, team_gp=away_team_gp)
+
+    home_target = max(
+        92,
+        min(128, round(home_target + _defense_target_adjustment(home_ovr, away_def))),
+    )
+    away_target = max(
+        92,
+        min(128, round(away_target + _defense_target_adjustment(away_ovr, home_def))),
+    )
 
     home_box, home_score = simulate_team_box_score_from_roster(
-        home_roster, rng, home_pace, exclude_player_ids=home_exclude_ids
+        home_roster,
+        rng,
+        pace_factor=1.0,
+        exclude_player_ids=home_exclude_ids,
+        team_gp=home_team_gp,
+        target_score=home_target,
     )
     away_box, away_score = simulate_team_box_score_from_roster(
-        away_roster, rng, away_pace, exclude_player_ids=away_exclude_ids
+        away_roster,
+        rng,
+        pace_factor=1.0,
+        exclude_player_ids=away_exclude_ids,
+        team_gp=away_team_gp,
+        target_score=away_target,
     )
-
-    home_score, away_score = _apply_defense_modifier(home_box, away_box, home_def, away_def)
 
     home_bonus = rng.randint(2, 3)
     home_score, away_score = _apply_score_adjustment(home_box, away_box, home_bonus, 0)

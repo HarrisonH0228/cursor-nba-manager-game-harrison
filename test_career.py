@@ -144,7 +144,7 @@ class CareerTests(unittest.TestCase):
         for year in range(6):
             apply_season_aging(season, rng=random.Random(20 + year))
         ppgs = [player.get("ppg") or 0 for player in season["players"].values()]
-        self.assertLessEqual(max(ppgs), 32.0)
+        self.assertLessEqual(max(ppgs), 36.0)
         elite_count = sum(1 for ppg in ppgs if ppg >= 28)
         self.assertLess(elite_count, len(ppgs) * 0.05)
 

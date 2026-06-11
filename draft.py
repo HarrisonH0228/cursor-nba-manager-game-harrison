@@ -28,8 +28,8 @@ def _scout_grade_range(global_pick, team_count):
         if pick_in_round <= 3:
             return 62, 70
         if pick_in_round <= 14:
-            return 58, 66
-        return 50, 58
+            return 54, 64
+        return 48, 58
     if round_num == 2:
         return 38, 48
     return 22, 32
@@ -240,6 +240,7 @@ def _assign_rookie(season, prospect, team_id):
     prospect["team_id"] = team_id
     prospect["team"] = team_name(season, team_id)
     prospect["drafted"] = True
+    prospect["stats_source"] = "generated"
     season["players"][str(prospect["id"])] = prospect
     roster = season["rosters"].setdefault(str(team_id), [])
     if prospect["id"] not in roster:
@@ -351,6 +352,69 @@ def skip_pick(season, team_id):
     _advance_pick_state(season)
 
     return True, f"Skipped pick #{slot['pick_number']} (Round {round_num})."
+
+
+def trade_pick_for_future(season, team_id, partner_team_id, incoming_future_pick_id):
+    """Trade the current pick slot for a partner's future-year pick."""
+    from trade import TRADE_TOLERANCE, pick_value
+
+    state = season.get("draft_state")
+    if not state:
+        return False, "Draft has not started."
+
+    slot = current_pick(season)
+    if not slot:
+        return False, "Draft is complete."
+
+    owner_id = _pick_owner(slot)
+    if owner_id != team_id:
+        return False, "Not your pick."
+
+    partner_team_id = int(partner_team_id)
+    if partner_team_id == team_id:
+        return False, "Cannot trade with yourself."
+
+    partner_future = season.get("future_draft_picks", {}).get(str(partner_team_id), [])
+    incoming_pick = next((pick for pick in partner_future if pick["id"] == incoming_future_pick_id), None)
+    if not incoming_pick:
+        return False, "Partner does not own that future pick."
+
+    round_num = slot["round"]
+    consumed = _consume_pick_asset_for_slot(season, owner_id, slot["team_id"], round_num)
+    if consumed is None:
+        return False, "No pick asset available for this slot."
+
+    draft_year = season.get("season_year", 2026) + 1
+    outgoing_val = pick_value(consumed, current_draft_year=draft_year)
+    incoming_val = pick_value(incoming_pick, current_draft_year=draft_year)
+    if abs(outgoing_val - incoming_val) > TRADE_TOLERANCE:
+        season["draft_picks"].setdefault(str(owner_id), []).append(consumed)
+        return False, "Partner won't trade that future pick for this slot."
+
+    season["draft_picks"].setdefault(str(partner_team_id), []).append(consumed)
+    partner_future.remove(incoming_pick)
+    season.setdefault("future_draft_picks", {}).setdefault(str(team_id), []).append(incoming_pick)
+
+    state["recent_picks"].insert(
+        0,
+        {
+            "pick_number": slot["pick_number"],
+            "round": round_num,
+            "team_id": team_id,
+            "team_name": team_name(season, team_id),
+            "player_name": f"— (traded for {incoming_pick['year']} R{incoming_pick['round']})",
+            "overall": None,
+            "career_arc": None,
+            "skipped": True,
+        },
+    )
+    state["recent_picks"] = state["recent_picks"][:20]
+    _advance_pick_state(season)
+
+    return True, (
+        f"Traded pick #{slot['pick_number']} for "
+        f"{incoming_pick['year']} Round {incoming_pick['round']} pick."
+    )
 
 
 def _prepare_user_options(season, rng=None):

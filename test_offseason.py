@@ -494,6 +494,43 @@ class OffseasonTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn(str(MIN_ROSTER), message)
 
+    def test_release_works_when_team_id_desynced(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        player_id = self.season["rosters"][str(user_team)][0]
+        self.season["players"][str(player_id)]["team_id"] = 999999
+        ok, _ = release_player(self.season, user_team, player_id)
+        self.assertTrue(ok)
+        self.assertNotIn(player_id, self.season["rosters"][str(user_team)])
+
+    def test_partner_trade_auto_releases_when_over_cap(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(iter(self.season["rosters"].keys())))
+        if partner_team == user_team:
+            partner_team = int(list(self.season["rosters"].keys())[1])
+
+        partner_roster = self.season["rosters"][str(partner_team)]
+        while len(partner_roster) < MAX_ROSTER:
+            clone = dict(self.season["players"][str(partner_roster[0])])
+            clone["id"] = 9900000 + len(partner_roster)
+            clone["name"] = f"Filler {clone['id']}"
+            self.season["players"][str(clone["id"])] = clone
+            partner_roster.append(clone["id"])
+
+        user_player = self.season["players"][str(self.season["rosters"][str(user_team)][0])]
+        partner_player = self.season["players"][str(partner_roster[0])]
+
+        ok, message = execute_trade(
+            self.season,
+            user_team,
+            partner_team,
+            [user_player["id"]],
+            [],
+            [partner_player["id"]],
+            [],
+        )
+        self.assertTrue(ok, message)
+        self.assertLessEqual(roster_size(self.season, partner_team), MAX_ROSTER)
+
 
 if __name__ == "__main__":
     unittest.main()

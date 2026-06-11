@@ -133,7 +133,7 @@ class AttributeTests(unittest.TestCase):
         attrs = {"scoring": 99, "playmaking": 99, "rebounding": 99, "defense": 99, "efficiency": 99, "stamina": 99}
         player = {"positions": ["SG"], "stat_modifiers": {"ppg": 1.06, "rpg": 1.0, "apg": 1.0, "spg": 1.0, "bpg": 1.0}}
         stats = season_averages_from_attributes_deterministic(attrs, player)
-        self.assertLessEqual(stats["ppg"], 32.0)
+        self.assertLessEqual(stats["ppg"], 36.0)
 
     def test_rookie_profile_assigns_positions(self):
         profile = generate_rookie_profile(60, rng=random.Random(5))
@@ -163,12 +163,12 @@ class AttributeTests(unittest.TestCase):
         rng = random.Random(43)
         sorted_players = sorted(
             self.players,
-            key=lambda player: player.get("ppg") or 0,
+            key=lambda player: player.get("overall") or 0,
             reverse=True,
         )
-        elite_roster = sorted_players[:8]
-        weak_roster = sorted_players[-8:]
-        dummy_opponent = sorted_players[8:16]
+        elite_roster = sorted_players[:5]
+        weak_roster = sorted_players[-5:]
+        dummy_opponent = sorted_players[10:15]
 
         elite_totals = []
         weak_totals = []
@@ -183,6 +183,45 @@ class AttributeTests(unittest.TestCase):
         self.assertGreater(sum(elite_totals) / len(elite_totals), sum(weak_totals) / len(weak_totals))
         self.assertGreater(elite_spread, 5)
         self.assertGreater(weak_spread, 5)
+
+    def test_roster_ppg_spread_not_clustered_at_cap(self):
+        from attributes import refresh_team_roster_stats
+
+        team_id = self.players[0]["team_id"]
+        roster = [player for player in self.players if player.get("team_id") == team_id]
+        refresh_team_roster_stats(roster)
+        ppgs = [player.get("ppg") or 0 for player in roster]
+        self.assertGreater(max(ppgs) - min(ppgs), 10)
+        at_cap = sum(1 for ppg in ppgs if ppg >= 24)
+        self.assertLessEqual(at_cap, 3)
+
+    def test_realistic_team_scores_and_no_dual_80_scorers(self):
+        rng = random.Random(99)
+        team_id = self.players[0]["team_id"]
+        roster = [player for player in self.players if player.get("team_id") == team_id]
+        opponent = next(
+            player["team_id"] for player in self.players if player.get("team_id") != team_id
+        )
+        away_roster = [player for player in self.players if player.get("team_id") == opponent]
+        dual_80 = 0
+        for _ in range(100):
+            result = simulate_game_with_box_score(roster, away_roster, rng=rng)
+            self.assertGreaterEqual(result["home_score"], 85)
+            self.assertLessEqual(result["home_score"], 135)
+            self.assertGreaterEqual(result["away_score"], 85)
+            self.assertLessEqual(result["away_score"], 135)
+            home_80 = sum(1 for line in result["home_box"] if line["pts"] >= 80)
+            away_80 = sum(1 for line in result["away_box"] if line["pts"] >= 80)
+            if home_80 >= 2 or away_80 >= 2:
+                dual_80 += 1
+        self.assertEqual(dual_80, 0)
+
+    def test_at_least_five_players_get_minutes(self):
+        team_id = self.players[0]["team_id"]
+        roster = [player for player in self.players if player.get("team_id") == team_id]
+        minutes = allocate_minutes(roster)
+        active = sum(1 for value in minutes.values() if value > 0)
+        self.assertGreaterEqual(active, 5)
 
 
 if __name__ == "__main__":

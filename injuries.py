@@ -17,7 +17,7 @@ INJURY_TYPES = (
     "wrist",
 )
 
-INJURY_CHANCE_PER_GAME = 0.03
+INJURY_CHANCE_PER_GAME = 0.008
 SEVERE_INJURY_CHANCE = 0.15
 
 
@@ -96,6 +96,34 @@ def tick_injuries_after_game(roster) -> None:
             player.pop("injury", None)
         else:
             injury["games_remaining"] = remaining - 1
+
+
+def user_team_injury_report(season, user_team_id, lookup):
+    """Currently injured players on the user's roster."""
+    if not user_team_id:
+        return []
+    from season import roster_players
+
+    roster = roster_players(season, int(user_team_id), lookup)
+    report = []
+    for player in roster:
+        injury = player.get("injury")
+        if not injury:
+            continue
+        remaining = int(injury.get("games_remaining") or 0)
+        if remaining <= 0:
+            continue
+        report.append(
+            {
+                "player_id": player["id"],
+                "player_name": player.get("name", str(player["id"])),
+                "team_id": int(user_team_id),
+                "type": injury.get("type", "injury"),
+                "games_remaining": remaining,
+            }
+        )
+    report.sort(key=lambda item: item["games_remaining"], reverse=True)
+    return report
 
 
 def drain_pending_notifications(season) -> list[str]:

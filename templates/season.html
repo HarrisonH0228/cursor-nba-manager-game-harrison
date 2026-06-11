@@ -236,19 +236,18 @@
   </form>
 </div>
 
-{% if season.injury_log %}
+{% if user_injury_report %}
 <div class="card-nba mb-4">
   <div class="card-nba-header">
-    <h2>Injury Report</h2>
+    <h2>Your Injury Report</h2>
     <span class="badge-nba badge-nba-red">Medical</span>
   </div>
-  {% for injury in season.injury_log[-5:]|reverse %}
+  {% for injury in user_injury_report %}
   <div class="series-item">
-    <span style="color:var(--text-muted);font-size:.8rem;min-width:3.5rem;">Day {{ injury.day }}</span>
-    <span style="flex:1;font-weight:{% if user_team_id and injury.team_id == user_team_id %}600{% else %}400{% endif %};">
+    <span style="flex:1;font-weight:600;">
       {{ injury.player_name }}
       <span style="color:var(--text-muted);">({{ injury.type }})</span>
-      — out {{ injury.games_out }} game{% if injury.games_out != 1 %}s{% endif %}
+      — out {{ injury.games_remaining }} game{% if injury.games_remaining != 1 %}s{% endif %}
     </span>
   </div>
   {% endfor %}

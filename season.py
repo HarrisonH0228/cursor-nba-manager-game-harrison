@@ -2,7 +2,16 @@ import json
 import random
 import time
 
-from attributes import apply_attributes, apply_season_aging, backfill_career_metadata, ensure_positions, init_career_profile, needs_attributes
+from attributes import (
+    apply_attributes,
+    apply_season_aging,
+    backfill_career_metadata,
+    ensure_positions,
+    init_career_profile,
+    mark_nba_cache_stats,
+    needs_attributes,
+    refresh_team_roster_stats,
+)
 from ratings import compute_team_overall
 from simulation import simulate_game, simulate_game_with_box_score
 
@@ -89,13 +98,22 @@ def build_player_pool(cache_players, rng=None):
     for player in cache_players:
         player_id = player["id"]
         entry = dict(player)
+        original_gp = player.get("gp") or 0
         entry["is_rookie"] = False
         entry["season_gp"] = 0
         entry["gp"] = 0
         ensure_positions(entry)
         init_career_profile(entry, rng)
+        mark_nba_cache_stats(entry, source_gp=original_gp)
         pool[str(player_id)] = entry
     return pool
+
+
+def refresh_all_roster_stats(season, lookup=None):
+    lookup = lookup or league_lookup(season)
+    for team_id_str in season.get("rosters", {}).keys():
+        roster = roster_players(season, int(team_id_str), lookup)
+        refresh_team_roster_stats(roster)
 
 
 def _cap_team_rosters(season, max_size=15):
@@ -121,8 +139,17 @@ def migrate_season(season, rng=None):
     rng = rng or random.Random()
     if "free_agents" not in season:
         season["free_agents"] = []
+    if "future_draft_picks" not in season:
+        team_ids = [int(team_id) for team_id in season.get("rosters", {}).keys()]
+        draft_year = season.get("season_year", 2026) + 2
+        season["future_draft_picks"] = init_draft_picks(team_ids, draft_year)
+    from roster import repair_roster_sync
+
+    repair_roster_sync(season)
+    lookup = league_lookup(season)
     for player in season.get("players", {}).values():
         backfill_career_metadata(player, rng)
+    refresh_all_roster_stats(season, lookup)
     free_agents = []
     for key, player in season.get("players", {}).items():
         if not player.get("team_id"):
@@ -198,6 +225,7 @@ def init_season(players, season_year=2026, rng=None):
         for team_id in team_ids
     }
     draft_year = season_year + 1
+    future_year = season_year + 2
     player_pool = build_player_pool(players, rng)
     season = {
         "season_year": season_year,
@@ -209,6 +237,7 @@ def init_season(players, season_year=2026, rng=None):
         "players": player_pool,
         "free_agents": sorted(set(free_agent_ids)),
         "draft_picks": init_draft_picks(team_ids, draft_year),
+        "future_draft_picks": init_draft_picks(team_ids, future_year),
         "draft_state": None,
         "trades": [],
         "rosters": {str(team_id): roster for team_id, roster in team_players.items()},
@@ -224,6 +253,7 @@ def init_season(players, season_year=2026, rng=None):
 
     _sync_free_agents(season)
     season["free_agents"] = sorted(set(season.get("free_agents", []) + free_agent_ids))
+    refresh_all_roster_stats(season, league_lookup(season))
     return season
 
 
@@ -514,7 +544,8 @@ def advance_season(season, rng=None):
             "playoffs": None,
             "recent_results": [],
             "draft_state": None,
-            "draft_picks": init_draft_picks(team_ids, season_year + 1),
+            "draft_picks": season.get("future_draft_picks") or init_draft_picks(team_ids, season_year + 1),
+            "future_draft_picks": init_draft_picks(team_ids, season_year + 2),
             "last_retirements": retirements,
         }
     )
@@ -633,15 +664,18 @@ def _record_result(season, game, result):
     season["recent_results"] = season["recent_results"][:20]
 
 
-def _play_game(season, game, lookup, rng):
+def _play_game(season, game, lookup, rng, user_team_id=None):
     from injuries import injured_player_ids, roll_game_injuries, tick_injuries_after_game
 
     home_roster = roster_players(season, game["home_id"], lookup)
     away_roster = roster_players(season, game["away_id"], lookup)
     day = game.get("day", season.get("current_day", 1))
 
-    roll_game_injuries(season, game["home_id"], home_roster, day, rng)
-    roll_game_injuries(season, game["away_id"], away_roster, day, rng)
+    user_team_id = user_team_id or season.get("user_team_id")
+    if user_team_id and int(game["home_id"]) == int(user_team_id):
+        roll_game_injuries(season, game["home_id"], home_roster, day, rng)
+    elif user_team_id and int(game["away_id"]) == int(user_team_id):
+        roll_game_injuries(season, game["away_id"], away_roster, day, rng)
 
     home_injured = injured_player_ids(home_roster)
     away_injured = injured_player_ids(away_roster)
@@ -683,10 +717,11 @@ def _play_game(season, game, lookup, rng):
     return game
 
 
-def simulate_games(season, lookup, rng=None, through_day=None, count_days=None, through_team_gp=None):
+def simulate_games(season, lookup, rng=None, through_day=None, count_days=None, through_team_gp=None, user_team_id=None):
     rng = rng or random.Random()
     games_played = 0
     start_day = season.get("current_day", 1)
+    user_team_id = user_team_id or season.get("user_team_id")
 
     if count_days is not None:
         end_day = start_day + count_days - 1
@@ -704,19 +739,20 @@ def simulate_games(season, lookup, rng=None, through_day=None, count_days=None, 
                 continue
             if through_team_gp is not None and all_teams_at_gp(season, through_team_gp):
                 break
-            _play_game(season, game, lookup, rng)
+            _play_game(season, game, lookup, rng, user_team_id=user_team_id)
             games_played += 1
 
     return games_played
 
 
-def sim_rest_of_season(season, lookup, rng=None):
+def sim_rest_of_season(season, lookup, rng=None, user_team_id=None):
     rng = rng or random.Random()
+    user_team_id = user_team_id or season.get("user_team_id")
     games_played = 0
     for game in season["schedule"]:
         if game["played"]:
             continue
-        _play_game(season, game, lookup, rng)
+        _play_game(season, game, lookup, rng, user_team_id=user_team_id)
         games_played += 1
 
     gp_values = [record.get("gp", 0) for record in season.get("standings", {}).values()]
@@ -761,26 +797,27 @@ def sim_rest_of_season(season, lookup, rng=None):
     return games_played
 
 
-def sim_day(season, lookup, rng=None):
+def sim_day(season, lookup, rng=None, user_team_id=None):
     day = season.get("current_day", 1)
-    count = simulate_games(season, lookup, rng=rng, through_day=day)
+    count = simulate_games(season, lookup, rng=rng, through_day=day, user_team_id=user_team_id)
     season["current_day"] = day + 1
     if regular_season_complete(season):
         season["phase"] = "regular_complete"
     return count
 
 
-def sim_week(season, lookup, rng=None):
+def sim_week(season, lookup, rng=None, user_team_id=None):
     start_day = season.get("current_day", 1)
-    count = simulate_games(season, lookup, rng=rng, count_days=7)
+    count = simulate_games(season, lookup, rng=rng, count_days=7, user_team_id=user_team_id)
     season["current_day"] = start_day + 7
     if regular_season_complete(season):
         season["phase"] = "regular_complete"
     return count
 
 
-def sim_to_trade_deadline(season, lookup, rng=None):
+def sim_to_trade_deadline(season, lookup, rng=None, user_team_id=None):
     rng = rng or random.Random()
+    user_team_id = user_team_id or season.get("user_team_id")
     target = season.get("trade_deadline_games", TRADE_DEADLINE_GAMES)
     games_played = 0
 
@@ -800,7 +837,7 @@ def sim_to_trade_deadline(season, lookup, rng=None):
         for game in day_games:
             if all_teams_at_gp(season, target):
                 break
-            _play_game(season, game, lookup, rng)
+            _play_game(season, game, lookup, rng, user_team_id=user_team_id)
             games_played += 1
 
         season["current_day"] = day + 1
