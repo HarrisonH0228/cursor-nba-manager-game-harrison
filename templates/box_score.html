@@ -56,7 +56,7 @@
 <!-- Header -->
 <div class="page-header d-flex flex-wrap align-items-center justify-content-between gap-3">
   <div>
-    <p class="section-title">Box Score · Day {{ game.day }}</p>
+    <p class="section-title">Box Score · {% if game.game_number %}Playoffs Game {{ game.game_number }}{% else %}Day {{ game.day }}{% endif %}</p>
     <div style="display:flex;align-items:center;gap:1.25rem;flex-wrap:wrap;margin-top:.5rem;">
       <div style="display:flex;align-items:center;gap:.75rem;">
         <img class="team-logo-sm" data-team-logo="{{ home_name }}" alt="" onerror="this.style.display='none'">
@@ -72,7 +72,7 @@
       <span class="badge-nba badge-nba-green">Final</span>
     </div>
   </div>
-  <a href="{{ url_for('season_schedule', day=game.day) }}" class="btn-nba-secondary">← Schedule</a>
+  <a href="{{ back_url or url_for('season_schedule', day=game.day) }}" class="btn-nba-secondary">← Back</a>
 </div>
 
 <!-- Box scores -->

@@ -20,10 +20,12 @@ from game import clear_game, set_season_id
 from ratings import apply_ratings
 import cache
 from season import (
+    advance_playoff_round,
     advance_season,
     can_trade,
     init_season,
     league_lookup,
+    playoff_bracket_context,
     regular_season_complete,
     roster_players,
     seed_playoffs,
@@ -288,6 +290,42 @@ class OffseasonTests(unittest.TestCase):
             top_pick_counts[worst_team_id],
             max(count for team_id, count in top_pick_counts.items() if team_id != worst_team_id),
         )
+
+    def test_playoff_games_persist_box_scores(self):
+        lookup = league_lookup(self.season)
+        sim_rest_of_season(self.season, lookup, rng=self.rng)
+        seed_playoffs(self.season, lookup)
+        advance_playoff_round(self.season, lookup, rng=self.rng)
+
+        quarterfinals = self.season["playoffs"]["rounds"][0]
+        completed = [series for series in quarterfinals["series"] if series.get("complete")]
+        self.assertTrue(completed)
+        series = completed[0]
+        self.assertIn("games", series)
+        self.assertGreater(len(series["games"]), 0)
+        game = series["games"][0]
+        self.assertIn("home_box", game)
+        self.assertIn("away_box", game)
+        self.assertEqual(
+            sum(line["pts"] for line in game["home_box"]),
+            game["home_score"],
+        )
+        self.assertEqual(
+            sum(line["pts"] for line in game["away_box"]),
+            game["away_score"],
+        )
+
+    def test_playoff_bracket_context_splits_conferences(self):
+        lookup = league_lookup(self.season)
+        sim_rest_of_season(self.season, lookup, rng=self.rng)
+        seed_playoffs(self.season, lookup)
+        bracket = playoff_bracket_context(self.season)
+
+        self.assertEqual(len(bracket["east_rounds"]), 1)
+        self.assertEqual(len(bracket["west_rounds"]), 1)
+        self.assertEqual(len(bracket["east_rounds"][0]["series"]), 4)
+        self.assertEqual(len(bracket["west_rounds"][0]["series"]), 4)
+        self.assertIsNone(bracket["finals"])
 
     def test_playoff_teams_follow_playoff_finish(self):
         lookup = league_lookup(self.season)

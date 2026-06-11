@@ -984,11 +984,88 @@ def _series_label(series):
     return f"{high} {series['high_wins']} – {series['low_wins']} {low}"
 
 
+QF_SEED_LABELS = [(1, 8), (4, 5), (2, 7), (3, 6)]
+
+
+def playoff_bracket_context(season):
+    """Structure playoff rounds for East / Finals / West bracket rendering."""
+    playoffs = season.get("playoffs") or {}
+    rounds = playoffs.get("rounds", [])
+    if not rounds:
+        return {"east_rounds": [], "west_rounds": [], "finals": None}
+
+    east_rounds = []
+    west_rounds = []
+    finals = None
+
+    for round_idx, round_data in enumerate(rounds):
+        east_entries = []
+        west_entries = []
+        for series_idx, series in enumerate(round_data.get("series", [])):
+            entry = {
+                "series": series,
+                "round_idx": round_idx,
+                "series_idx": series_idx,
+                "high_seed_label": None,
+                "low_seed_label": None,
+            }
+            conference = series.get("conference")
+            if conference == "Finals":
+                if finals is None:
+                    finals = {
+                        "name": round_data.get("name", "NBA Finals"),
+                        "round_idx": round_idx,
+                        "series": [],
+                    }
+                finals["series"].append(entry)
+            elif conference == "East":
+                if round_idx == 0:
+                    label_index = len(east_entries)
+                    if label_index < len(QF_SEED_LABELS):
+                        entry["high_seed_label"], entry["low_seed_label"] = QF_SEED_LABELS[
+                            label_index
+                        ]
+                east_entries.append(entry)
+            elif conference == "West":
+                if round_idx == 0:
+                    label_index = len(west_entries)
+                    if label_index < len(QF_SEED_LABELS):
+                        entry["high_seed_label"], entry["low_seed_label"] = QF_SEED_LABELS[
+                            label_index
+                        ]
+                west_entries.append(entry)
+
+        if east_entries:
+            east_rounds.append(
+                {
+                    "name": round_data.get("name"),
+                    "round_idx": round_idx,
+                    "series": east_entries,
+                }
+            )
+        if west_entries:
+            west_rounds.append(
+                {
+                    "name": round_data.get("name"),
+                    "round_idx": round_idx,
+                    "series": west_entries,
+                }
+            )
+
+    return {"east_rounds": east_rounds, "west_rounds": west_rounds, "finals": finals}
+
+
 def _simulate_series(series, season, lookup, rng, user_team_id=None):
-    from injuries import game_exclude_ids, roll_game_injuries, tick_injuries_after_game
+    from injuries import (
+        build_dnp_list,
+        game_exclude_ids,
+        roll_game_injuries,
+        tick_injuries_after_game,
+    )
 
     user_team_id = user_team_id or season.get("user_team_id")
     day = season.get("current_day", season.get("max_day", 82))
+    games = series.setdefault("games", [])
     while series["high_wins"] < PLAYOFF_WINS_NEEDED and series["low_wins"] < PLAYOFF_WINS_NEEDED:
         home_roster = roster_players(season, series["high_seed_id"], lookup)
         away_roster = roster_players(season, series["low_seed_id"], lookup)
@@ -1017,6 +1094,20 @@ def _simulate_series(series, season, lookup, rng, user_team_id=None):
             series["high_wins"] += 1
         else:
             series["low_wins"] += 1
+
+        games.append(
+            {
+                "game_number": len(games) + 1,
+                "home_id": series["high_seed_id"],
+                "away_id": series["low_seed_id"],
+                "home_score": result["home_score"],
+                "away_score": result["away_score"],
+                "home_box": result["home_box"],
+                "away_box": result["away_box"],
+                "home_dnp": build_dnp_list(home_roster, home_exclude),
+                "away_dnp": build_dnp_list(away_roster, away_exclude),
+            }
+        )
 
         tick_injuries_after_game(home_roster)
         tick_injuries_after_game(away_roster)

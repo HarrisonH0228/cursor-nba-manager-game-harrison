@@ -35,6 +35,39 @@
 </div>
 {% endmacro %}
 
+{% macro bracket_series_card(entry, user_team_id) %}
+{% set series = entry.series %}
+{% set is_user_series = user_team_id and (series.high_seed_id == user_team_id or series.low_seed_id == user_team_id) %}
+<div class="bracket-series{% if is_user_series %} user-series{% endif %}">
+  <div class="bracket-team{% if series.complete and series.winner_id == series.high_seed_id %} bracket-team-winner{% endif %}">
+    {% if entry.high_seed_label %}<span class="bracket-seed">{{ entry.high_seed_label }}</span>{% endif %}
+    <img class="team-logo-sm" data-team-logo="{{ series.high_seed_name }}" alt="" onerror="this.style.display='none'">
+    <span class="bracket-team-name{% if user_team_id and series.high_seed_id == user_team_id %} bracket-team-you{% endif %}">{{ series.high_seed_name }}</span>
+    {% if user_team_id and series.high_seed_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
+    <span class="bracket-wins">{{ series.high_wins }}</span>
+  </div>
+  <div class="bracket-team{% if series.complete and series.winner_id == series.low_seed_id %} bracket-team-winner{% endif %}">
+    {% if entry.low_seed_label %}<span class="bracket-seed">{{ entry.low_seed_label }}</span>{% endif %}
+    <img class="team-logo-sm" data-team-logo="{{ series.low_seed_name }}" alt="" onerror="this.style.display='none'">
+    <span class="bracket-team-name{% if user_team_id and series.low_seed_id == user_team_id %} bracket-team-you{% endif %}">{{ series.low_seed_name }}</span>
+    {% if user_team_id and series.low_seed_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
+    <span class="bracket-wins">{{ series.low_wins }}</span>
+  </div>
+  {% if series.games %}
+  <div class="bracket-games">
+    {% for game in series.games %}
+    <a href="{{ url_for('season_playoff_box_score', round_idx=entry.round_idx, series_idx=entry.series_idx, game_idx=loop.index0) }}"
+       class="bracket-game-link{% if user_team_id and (game.home_id == user_team_id or game.away_id == user_team_id) %} bracket-game-user{% endif %}">
+      G{{ game.game_number }}: {{ game.home_score }}–{{ game.away_score }}
+    </a>
+    {% endfor %}
+  </div>
+  {% elif not series.complete and series.high_wins == 0 and series.low_wins == 0 %}
+  <div class="bracket-games bracket-games-pending"><span style="color:var(--text-muted);font-size:.75rem;">Not started</span></div>
+  {% endif %}
+</div>
+{% endmacro %}
+
 {% block content %}
 <!-- Page header -->
 <div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
@@ -91,10 +124,13 @@
 {% else %}
 
 {% if season.playoffs.champion_name %}
-<div class="glass-liquid p-4 mb-4 text-center" style="border-top:2px solid #fbbf24;">
+<div class="glass-liquid p-4 mb-4 text-center user-champion-banner{% if user_team_id and season.playoffs.champion_id == user_team_id %} user-champion-you{% endif %}" style="border-top:2px solid #fbbf24;">
   <div style="font-size:2rem;margin-bottom:.5rem;">🏆</div>
   <div class="section-title" style="color:#fbbf24;">NBA Champion</div>
   <div style="font-size:1.75rem;font-weight:900;">{{ season.playoffs.champion_name }}</div>
+  {% if user_team_id and season.playoffs.champion_id == user_team_id %}
+  <div class="mt-2"><span class="badge-nba badge-nba-blue badge-you">YOUR TEAM WON IT ALL</span></div>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -120,33 +156,47 @@
 </div>
 {% endif %}
 
-{% for round in season.playoffs.rounds %}
-{% if round.series %}
-<div class="card-nba mb-3">
-  <div class="card-nba-header"><h2>{{ round.name }}</h2></div>
-  {% for series in round.series %}
-  <div class="series-item">
-    <div>
-      <span style="font-weight:600;">{{ series.high_seed_name }}</span>
-      <span style="color:var(--text-muted);margin:0 .4rem;">vs</span>
-      <span style="font-weight:600;">{{ series.low_seed_name }}</span>
-      {% if series.conference != 'Finals' %}
-      <span style="color:var(--text-muted);font-size:.8rem;margin-left:.3rem;">({{ series.conference }})</span>
-      {% endif %}
+{% if bracket and (bracket.east_rounds or bracket.west_rounds or bracket.finals) %}
+<div class="playoff-bracket-wrap mb-4">
+  <div class="playoff-bracket">
+    <div class="bracket-side bracket-side-east">
+      <div class="bracket-side-label"><span class="badge-nba badge-nba-red">East</span></div>
+      {% for round in bracket.east_rounds %}
+      <div class="bracket-round">
+        <div class="bracket-round-name">{{ round.name }}</div>
+        {% for entry in round.series %}
+        {{ bracket_series_card(entry, user_team_id) }}
+        {% endfor %}
+      </div>
+      {% endfor %}
     </div>
-    <div>
-      {% if series.complete %}
-      <span class="series-winner">{{ series.winner_name }}</span>
-      <span style="color:var(--text-muted);font-size:.85rem;margin-left:.5rem;">{{ series.high_wins }}–{{ series.low_wins }}</span>
-      {% else %}
-      <span style="color:var(--text-muted);">{{ series.high_wins }}–{{ series.low_wins }}</span>
-      {% endif %}
+
+    {% if bracket.finals %}
+    <div class="bracket-finals">
+      <div class="bracket-side-label"><span class="badge-nba" style="background:#fbbf24;color:#000;">Finals</span></div>
+      <div class="bracket-round">
+        <div class="bracket-round-name">{{ bracket.finals.name }}</div>
+        {% for entry in bracket.finals.series %}
+        {{ bracket_series_card(entry, user_team_id) }}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="bracket-side bracket-side-west">
+      <div class="bracket-side-label"><span class="badge-nba badge-nba-blue">West</span></div>
+      {% for round in bracket.west_rounds|reverse %}
+      <div class="bracket-round">
+        <div class="bracket-round-name">{{ round.name }}</div>
+        {% for entry in round.series %}
+        {{ bracket_series_card(entry, user_team_id) }}
+        {% endfor %}
+      </div>
+      {% endfor %}
     </div>
   </div>
-  {% endfor %}
 </div>
 {% endif %}
-{% endfor %}
 {% endif %}
 
 {% elif page == 'schedule' %}

@@ -26,6 +26,7 @@ from season import (
     games_played_count,
     init_season,
     league_lookup,
+    playoff_bracket_context,
     regular_season_complete,
     roster_players,
     schedule_games,
@@ -1094,6 +1095,7 @@ def season_playoffs():
 
     east_standings = standings_table(season_data, conference="East")
     west_standings = standings_table(season_data, conference="West")
+    bracket = playoff_bracket_context(season_data)
     return render_template(
         "season.html",
         page_title="Playoffs",
@@ -1103,10 +1105,51 @@ def season_playoffs():
         east_standings=east_standings,
         west_standings=west_standings,
         user_team_id=game["team_id"],
+        bracket=bracket,
         schedule=[],
         schedule_day=season_data.get("current_day", 1),
         games_played=games_played_count(season_data),
         regular_complete=regular_season_complete(season_data),
+    )
+
+
+@app.route("/season/playoffs/series/<int:round_idx>/<int:series_idx>/game/<int:game_idx>")
+def season_playoff_box_score(round_idx, series_idx, game_idx):
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game_state = get_game()
+    _, _, _lookup, _season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    playoffs = season_data.get("playoffs") or {}
+    rounds = playoffs.get("rounds", [])
+    if round_idx < 0 or round_idx >= len(rounds):
+        flash("Playoff series not found.")
+        return redirect(url_for("season_playoffs"))
+
+    series_list = rounds[round_idx].get("series", [])
+    if series_idx < 0 or series_idx >= len(series_list):
+        flash("Playoff series not found.")
+        return redirect(url_for("season_playoffs"))
+
+    games = series_list[series_idx].get("games", [])
+    if game_idx < 0 or game_idx >= len(games):
+        flash("Box score not available for that game.")
+        return redirect(url_for("season_playoffs"))
+
+    playoff_game = games[game_idx]
+    return render_template(
+        "box_score.html",
+        page_title="Playoff Box Score",
+        game=playoff_game,
+        home_name=team_name(season_data, playoff_game["home_id"]),
+        away_name=team_name(season_data, playoff_game["away_id"]),
+        user_team_id=game_state["team_id"],
+        back_url=url_for("season_playoffs"),
     )
 
 

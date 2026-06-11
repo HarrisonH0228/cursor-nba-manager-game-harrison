@@ -164,6 +164,63 @@ def release_player(season, team_id, player_id, force=False):
     return True, f"Released {player.get('name', player_id)} to free agency."
 
 
+def assign_player_to_team(season, player_id, new_team_id, *, force=False):
+    """Move a player to a team or free agency. Admin uses force=True to bypass phase/roster limits."""
+    lookup = league_lookup(season)
+    player_id = int(player_id)
+    player = lookup.get(player_id)
+    if not player:
+        return False, "Player not found."
+
+    current_team_id = _player_team_id(player)
+    new_team_id = _normalize_team_id(new_team_id)
+
+    if current_team_id == new_team_id:
+        return True, "No team change."
+
+    if not force:
+        if not can_trade(season):
+            return False, "Roster moves are not available in this phase."
+        if new_team_id is None and current_team_id is not None:
+            if not can_remove_player(season, current_team_id):
+                return False, f"Cannot drop below {MIN_ROSTER} players."
+        if new_team_id is not None and not can_add_player(season, new_team_id):
+            return False, f"Cannot exceed roster limit ({MAX_ROSTER} players)."
+
+    if current_team_id is not None:
+        old_roster = season["rosters"].setdefault(str(current_team_id), [])
+        if player_id in old_roster:
+            old_roster.remove(player_id)
+
+    if new_team_id is None:
+        player["team_id"] = None
+        player["team"] = "Free Agent"
+        try:
+            from contracts import compute_asking_salary, refresh_all_team_finances
+
+            player["asking_salary"] = compute_asking_salary(player)
+            refresh_all_team_finances(season)
+        except ImportError:
+            pass
+        _sync_free_agents(season)
+        return True, f"Moved {player.get('name', player_id)} to free agency."
+
+    roster = season["rosters"].setdefault(str(new_team_id), [])
+    if player_id not in roster:
+        roster.append(player_id)
+    player["team_id"] = new_team_id
+    player["team"] = team_name(season, new_team_id)
+    try:
+        from contracts import assign_player_contract, refresh_all_team_finances
+
+        assign_player_contract(player)
+        refresh_all_team_finances(season)
+    except ImportError:
+        pass
+    _sync_free_agents(season)
+    return True, f"Moved {player.get('name', player_id)} to {player['team']}."
+
+
 def sign_free_agent(season, team_id, player_id, salary=None, years=2):
     """Sign FA with contract offer (defaults to asking salary)."""
     from contracts import compute_asking_salary, propose_offer

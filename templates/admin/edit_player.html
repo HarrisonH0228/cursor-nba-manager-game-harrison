@@ -7,6 +7,15 @@
   <div class="mb-3"><label>Name</label><input class="form-control" name="name" value="{{ form_data.get('name', player.name) if form_data else player.name }}"></div>
   <div class="mb-3"><label>Age</label><input class="form-control" name="age" value="{{ form_data.get('age', player.age or 25) if form_data else (player.age or 25) }}"></div>
   <div class="mb-3"><label>Positions (PG/SG)</label><input class="form-control" name="positions" value="{{ form_data.get('positions', player.positions|join('/') if player.positions else '') if form_data else (player.positions|join('/') if player.positions else '') }}"></div>
+  <div class="mb-3">
+    <label>Team</label>
+    <select class="form-control" name="team_id">
+      <option value="" {% if form_data %}{% if not form_data.get('team_id') %}selected{% endif %}{% elif not player.team_id %}selected{% endif %}>Free Agent</option>
+      {% for team in teams %}
+      <option value="{{ team.team_id }}" {% if form_data %}{% if form_data.get('team_id') == team.team_id|string %}selected{% endif %}{% elif player.team_id == team.team_id %}selected{% endif %}>{{ team.team_name }}</option>
+      {% endfor %}
+    </select>
+  </div>
 
   <h3 style="font-size:1rem;margin:1.5rem 0 1rem;">Career</h3>
   <div class="mb-3"><label>Potential (40–99)</label><input class="form-control" name="potential" value="{{ form_data.get('potential', player.potential or '') if form_data else (player.potential or '') }}"></div>

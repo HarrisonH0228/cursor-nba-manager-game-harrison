@@ -21,6 +21,7 @@ from draft import generate_rookie_profile
 from game import get_game, load_session_season, save_session_season
 from names import ensure_unique_name
 from ratings import compute_intrinsic_overall
+from roster import assign_player_to_team
 from season import allocate_player_id, league_lookup, refresh_all_roster_stats, roster_players, team_name
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -193,6 +194,16 @@ def _validate_player_form(form, *, is_create=False, existing_player=None, valid_
                 errors.append("Select a valid team when assigning to a roster.")
             else:
                 parsed["team_id"] = team_id
+    elif valid_team_ids is not None:
+        team_id_raw = form.get("team_id", "").strip()
+        if team_id_raw == "":
+            parsed["team_id"] = None
+        else:
+            team_id = _parse_int(team_id_raw)
+            if team_id is None or team_id not in valid_team_ids:
+                errors.append("Select a valid team or Free Agent.")
+            else:
+                parsed["team_id"] = team_id
 
     parsed["name"] = form.get("name", "").strip() or "Custom Player"
     return errors, parsed
@@ -230,6 +241,15 @@ def admin_players():
     )
 
 
+def _admin_teams(season_data):
+    teams = [
+        {"team_id": int(team_id), "team_name": record.get("team_name", team_id)}
+        for team_id, record in season_data.get("standings", {}).items()
+    ]
+    teams.sort(key=lambda item: item["team_name"])
+    return teams
+
+
 @admin_bp.route("/players/<int:player_id>/edit", methods=["GET", "POST"])
 def admin_edit_player(player_id):
     season_id, season_data, lookup, redirect_response = _season_or_redirect()
@@ -240,11 +260,15 @@ def admin_edit_player(player_id):
         flash("Player not found.", "error")
         return redirect(url_for("admin.admin_players"))
 
+    teams = _admin_teams(season_data)
+    valid_team_ids = {team["team_id"] for team in teams}
+
     if request.method == "POST":
         errors, parsed = _validate_player_form(
             request.form,
             is_create=False,
             existing_player=player,
+            valid_team_ids=valid_team_ids,
         )
         if errors:
             for message in errors:
@@ -258,6 +282,7 @@ def admin_edit_player(player_id):
                 "admin/edit_player.html",
                 page_title=f"Edit {player.get('name', player_id)}",
                 player=player,
+                teams=teams,
                 attribute_keys=ATTRIBUTE_KEYS,
                 years_to_peak=years_to_peak,
                 form_data=request.form,
@@ -304,6 +329,32 @@ def admin_edit_player(player_id):
             refresh_player_from_attributes(player)
 
         player["overall"] = compute_intrinsic_overall(player)
+
+        if "team_id" in parsed:
+            current_team = _parse_int(player.get("team_id"))
+            new_team = parsed["team_id"]
+            if current_team != new_team:
+                ok, team_message = assign_player_to_team(
+                    season_data, player_id, new_team, force=True
+                )
+                if not ok:
+                    flash(team_message, "error")
+                    err_years_to_peak = None
+                    peak_age = parsed.get("peak_age", player.get("peak_age"))
+                    age = parsed.get("age", player.get("age"))
+                    if peak_age is not None and age is not None:
+                        err_years_to_peak = max(0, peak_age - age)
+                    return render_template(
+                        "admin/edit_player.html",
+                        page_title=f"Edit {player.get('name', player_id)}",
+                        player=player,
+                        teams=teams,
+                        attribute_keys=ATTRIBUTE_KEYS,
+                        years_to_peak=err_years_to_peak,
+                        form_data=request.form,
+                    )
+                flash(team_message)
+
         if player.get("team_id"):
             refresh_all_roster_stats(season_data, lookup)
         refresh_all_team_finances(season_data, lookup)
@@ -319,6 +370,7 @@ def admin_edit_player(player_id):
         "admin/edit_player.html",
         page_title=f"Edit {player.get('name', player_id)}",
         player=player,
+        teams=teams,
         attribute_keys=ATTRIBUTE_KEYS,
         years_to_peak=years_to_peak,
     )
@@ -330,14 +382,10 @@ def admin_create_player():
     if redirect_response is not None:
         return redirect_response
 
-    teams = [
-        {"team_id": int(team_id), "team_name": record.get("team_name", team_id)}
-        for team_id, record in season_data.get("standings", {}).items()
-    ]
-    teams.sort(key=lambda item: item["team_name"])
+    teams = _admin_teams(season_data)
 
     if request.method == "POST":
-        valid_team_ids = {int(team_id) for team_id in season_data.get("standings", {})}
+        valid_team_ids = {team["team_id"] for team in teams}
         errors, parsed = _validate_player_form(
             request.form,
             is_create=True,
