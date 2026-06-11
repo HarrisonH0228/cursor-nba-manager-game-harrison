@@ -321,11 +321,72 @@ class OffseasonTests(unittest.TestCase):
         seed_playoffs(self.season, lookup)
         bracket = playoff_bracket_context(self.season)
 
-        self.assertEqual(len(bracket["east_rounds"]), 1)
-        self.assertEqual(len(bracket["west_rounds"]), 1)
+        self.assertEqual(len(bracket["east_rounds"]), 3)
+        self.assertEqual(len(bracket["west_rounds"]), 3)
         self.assertEqual(len(bracket["east_rounds"][0]["series"]), 4)
         self.assertEqual(len(bracket["west_rounds"][0]["series"]), 4)
-        self.assertIsNone(bracket["finals"])
+        self.assertEqual(len(bracket["east_rounds"][1]["series"]), 2)
+        self.assertEqual(len(bracket["west_rounds"][1]["series"]), 2)
+        self.assertEqual(len(bracket["east_rounds"][2]["series"]), 1)
+        self.assertIsNotNone(bracket["finals"])
+        self.assertTrue(
+            bracket["east_rounds"][1]["series"][0]["series"].get("placeholder")
+        )
+
+    def test_trade_with_string_team_id(self):
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+
+        user_player = lookup[self.season["rosters"][str(user_team)][0]]
+        partner_player = lookup[self.season["rosters"][str(partner_team)][0]]
+        user_player["team_id"] = str(user_team)
+        user_player["salary"] = 10.0
+        partner_player["salary"] = 10.0
+
+        valid, message = validate_trade(
+            self.season,
+            user_team,
+            partner_team,
+            [user_player["id"]],
+            [],
+            [partner_player["id"]],
+            [],
+        )
+        self.assertTrue(valid, message)
+
+        ok, exec_message = execute_trade(
+            self.season,
+            user_team,
+            partner_team,
+            [user_player["id"]],
+            [],
+            [partner_player["id"]],
+            [],
+        )
+        self.assertTrue(ok, exec_message)
+        self.assertEqual(int(self.season["players"][str(user_player["id"])]["team_id"]), partner_team)
+
+    def test_roster_players_resolves_string_roster_ids(self):
+        from simulation import simulate_game_with_box_score
+
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+        self.season["rosters"][str(user_team)] = [
+            str(pid) for pid in self.season["rosters"][str(user_team)]
+        ]
+        home_roster = roster_players(self.season, user_team, lookup)
+        away_roster = roster_players(self.season, partner_team, lookup)
+        self.assertGreaterEqual(len(home_roster), MIN_ROSTER)
+
+        result = simulate_game_with_box_score(
+            home_roster,
+            away_roster,
+            rng=self.rng,
+        )
+        self.assertGreaterEqual(len(result["home_box"]), 5)
+        self.assertGreaterEqual(len(result["away_box"]), 5)
 
     def test_playoff_teams_follow_playoff_finish(self):
         lookup = league_lookup(self.season)

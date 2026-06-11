@@ -7,6 +7,9 @@ from news_templates import TEMPLATES
 
 MAX_NEWS_ITEMS = 30
 OFFCOURT_NEWS_CHANCE = 0.35
+ROOKIE_NEWS_CHANCE = 0.20
+ROOKIE_MIN_OVERALL = 75
+ROOKIE_MAX_AGE = 22
 
 
 def _format_headline(season, category, context):
@@ -82,6 +85,26 @@ def _ambient_headline(season, lookup, rng, existing):
     return None
 
 
+def _standout_rookies(season, lookup):
+    from season import roster_players, team_name
+
+    rookies = []
+    for team_id_str in season.get("rosters", {}):
+        team_id = int(team_id_str)
+        for player in roster_players(season, team_id, lookup):
+            age = player.get("age")
+            overall = player.get("overall") or 0
+            if age is not None and age <= ROOKIE_MAX_AGE and overall >= ROOKIE_MIN_OVERALL:
+                rookies.append(
+                    {
+                        "player": player.get("name", "Unknown"),
+                        "team": team_name(season, team_id),
+                        "overall": overall,
+                    }
+                )
+    return rookies
+
+
 def news_headlines(season, limit=12, lookup=None, rng=None):
     seen = set()
     unique = []
@@ -96,9 +119,12 @@ def news_headlines(season, limit=12, lookup=None, rng=None):
     if len(unique) >= limit or not lookup:
         return unique
 
+    feed_count = len(unique)
+    padding_target = 8 if feed_count >= 4 else limit
+
     rng = rng or random.Random()
     attempts = 0
-    while len(unique) < limit and attempts < limit * 4:
+    while len(unique) < padding_target and attempts < padding_target * 4:
         attempts += 1
         headline = _ambient_headline(season, lookup, rng, seen)
         if headline:
@@ -121,4 +147,22 @@ def maybe_roll_offcourt_news(season, lookup, day, rng=None):
         "offcourt",
         player=ctx["player"],
         team=ctx["team"],
+    )
+
+
+def maybe_roll_rookie_news(season, lookup, day, rng=None):
+    """Maybe spotlight a standout young player during the season."""
+    rng = rng or random.Random()
+    if rng.random() >= ROOKIE_NEWS_CHANCE:
+        return ""
+    rookies = _standout_rookies(season, lookup)
+    if not rookies:
+        return ""
+    pick = rng.choice(rookies)
+    return append_news(
+        season,
+        "rookie",
+        player=pick["player"],
+        team=pick["team"],
+        overall=pick["overall"],
     )

@@ -1027,6 +1027,21 @@ def _build_team_box_score(
         for player in roster
         if minutes_map.get(player["id"], 0) > 0 and player["id"] not in exclude_player_ids
     ]
+    eligible = [player for player in roster if player["id"] not in exclude_player_ids]
+    if len(active) < MIN_STARTERS and eligible:
+        active_ids = {player["id"] for player in active}
+        extras = sorted(
+            [player for player in eligible if player["id"] not in active_ids],
+            key=lambda player: player.get("overall") or 0,
+            reverse=True,
+        )
+        target = min(MIN_STARTERS, len(eligible))
+        for player in extras:
+            if len(active) >= target:
+                break
+            if minutes_map.get(player["id"], 0) <= 0:
+                minutes_map[player["id"]] = rng.randint(8, 12)
+            active.append(player)
     if not active:
         return []
 

@@ -535,6 +535,9 @@ def trade():
         partner_id = int(partner_raw)
 
     user_team_id = game["team_id"]
+    repair_roster_sync(season_data, user_team_id)
+    if partner_id is not None:
+        repair_roster_sync(season_data, partner_id)
     lookup = league_lookup(season_data)
     user_roster = sorted(
         roster_players(season_data, user_team_id, lookup),
@@ -599,6 +602,9 @@ def trade_propose():
     outgoing_picks = request.form.getlist("outgoing_picks")
     incoming_players = request.form.getlist("incoming_players")
     incoming_picks = request.form.getlist("incoming_picks")
+
+    repair_roster_sync(season_data, game["team_id"])
+    repair_roster_sync(season_data, partner_id)
 
     valid, message = validate_trade(
         season_data,

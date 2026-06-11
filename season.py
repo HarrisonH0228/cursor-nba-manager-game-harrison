@@ -358,7 +358,12 @@ def roster_players(season, team_id, lookup=None):
     if lookup is None:
         lookup = league_lookup(season)
     roster_ids = season.get("rosters", {}).get(str(team_id), [])
-    return [lookup[player_id] for player_id in roster_ids if player_id in lookup]
+    players = []
+    for player_id in roster_ids:
+        pid = int(player_id)
+        if pid in lookup:
+            players.append(lookup[pid])
+    return players
 
 
 def allocate_player_id(season):
@@ -811,9 +816,10 @@ def simulate_games(season, lookup, rng=None, through_day=None, count_days=None, 
             games_played += 1
 
         try:
-            from news import maybe_roll_offcourt_news
+            from news import maybe_roll_offcourt_news, maybe_roll_rookie_news
 
             maybe_roll_offcourt_news(season, lookup, day, rng)
+            maybe_roll_rookie_news(season, lookup, day, rng)
         except ImportError:
             pass
 
@@ -916,9 +922,10 @@ def sim_to_trade_deadline(season, lookup, rng=None, user_team_id=None):
             games_played += 1
 
         try:
-            from news import maybe_roll_offcourt_news
+            from news import maybe_roll_offcourt_news, maybe_roll_rookie_news
 
             maybe_roll_offcourt_news(season, lookup, day, rng)
+            maybe_roll_rookie_news(season, lookup, day, rng)
         except ImportError:
             pass
 
@@ -985,6 +992,86 @@ def _series_label(series):
 
 
 QF_SEED_LABELS = [(1, 8), (4, 5), (2, 7), (3, 6)]
+BRACKET_ROUND_NAMES = [
+    "Conference Quarterfinals",
+    "Conference Semifinals",
+    "Conference Finals",
+]
+BRACKET_SERIES_COUNTS = [4, 2, 1]
+EAST_GRID_ROWS = [[1], [3], [5], [7], [2], [6], [4]]
+WEST_GRID_ROWS = [[1], [3], [5], [7], [2], [6], [4]]
+EAST_GRID_COLS = [1, 1, 1, 1, 2, 2, 3]
+WEST_GRID_COLS = [3, 3, 3, 3, 2, 2, 1]
+
+
+def _placeholder_series(conference):
+    return {
+        "conference": conference,
+        "high_seed_id": None,
+        "high_seed_name": "TBD",
+        "low_seed_id": None,
+        "low_seed_name": "TBD",
+        "high_wins": 0,
+        "low_wins": 0,
+        "winner_id": None,
+        "winner_name": None,
+        "complete": False,
+        "placeholder": True,
+    }
+
+
+def _bracket_entry(series, round_idx, series_idx, conference, slot_index):
+    entry = {
+        "series": series,
+        "round_idx": round_idx,
+        "series_idx": series_idx,
+        "high_seed_label": None,
+        "low_seed_label": None,
+        "grid_row": EAST_GRID_ROWS[slot_index][0],
+        "grid_col": EAST_GRID_COLS[slot_index] if conference == "East" else WEST_GRID_COLS[slot_index],
+    }
+    if round_idx == 0 and slot_index < len(QF_SEED_LABELS):
+        entry["high_seed_label"], entry["low_seed_label"] = QF_SEED_LABELS[slot_index]
+    return entry
+
+
+def _conference_round_series(rounds, conference, round_idx):
+    if round_idx >= len(rounds):
+        return []
+    return [
+        series
+        for series in rounds[round_idx].get("series", [])
+        if series.get("conference") == conference
+    ]
+
+
+def _build_conference_rounds(rounds, conference):
+    built = []
+    slot_offset = 0
+    for round_idx, expected_count in enumerate(BRACKET_SERIES_COUNTS):
+        existing = _conference_round_series(rounds, conference, round_idx)
+        entries = []
+        for index in range(expected_count):
+            slot_index = slot_offset + index
+            if index < len(existing):
+                series = existing[index]
+                entries.append(
+                    _bracket_entry(series, round_idx, index, conference, slot_index)
+                )
+            else:
+                placeholder = _placeholder_series(conference)
+                entries.append(
+                    _bracket_entry(placeholder, round_idx, index, conference, slot_index)
+                )
+        built.append(
+            {
+                "name": BRACKET_ROUND_NAMES[round_idx],
+                "round_idx": round_idx,
+                "series": entries,
+            }
+        )
+        slot_offset += expected_count
+    return built
 
 
 def playoff_bracket_context(season):
@@ -994,63 +1081,46 @@ def playoff_bracket_context(season):
     if not rounds:
         return {"east_rounds": [], "west_rounds": [], "finals": None}
 
-    east_rounds = []
-    west_rounds = []
+    east_rounds = _build_conference_rounds(rounds, "East")
+    west_rounds = _build_conference_rounds(rounds, "West")
+
     finals = None
-
     for round_idx, round_data in enumerate(rounds):
-        east_entries = []
-        west_entries = []
         for series_idx, series in enumerate(round_data.get("series", [])):
-            entry = {
-                "series": series,
-                "round_idx": round_idx,
-                "series_idx": series_idx,
-                "high_seed_label": None,
-                "low_seed_label": None,
-            }
-            conference = series.get("conference")
-            if conference == "Finals":
-                if finals is None:
-                    finals = {
-                        "name": round_data.get("name", "NBA Finals"),
-                        "round_idx": round_idx,
-                        "series": [],
-                    }
-                finals["series"].append(entry)
-            elif conference == "East":
-                if round_idx == 0:
-                    label_index = len(east_entries)
-                    if label_index < len(QF_SEED_LABELS):
-                        entry["high_seed_label"], entry["low_seed_label"] = QF_SEED_LABELS[
-                            label_index
-                        ]
-                east_entries.append(entry)
-            elif conference == "West":
-                if round_idx == 0:
-                    label_index = len(west_entries)
-                    if label_index < len(QF_SEED_LABELS):
-                        entry["high_seed_label"], entry["low_seed_label"] = QF_SEED_LABELS[
-                            label_index
-                        ]
-                west_entries.append(entry)
+            if series.get("conference") != "Finals":
+                continue
+            if finals is None:
+                finals = {
+                    "name": round_data.get("name", "NBA Finals"),
+                    "round_idx": round_idx,
+                    "series": [],
+                }
+            finals["series"].append(
+                {
+                    "series": series,
+                    "round_idx": round_idx,
+                    "series_idx": series_idx,
+                    "high_seed_label": None,
+                    "low_seed_label": None,
+                }
+            )
 
-        if east_entries:
-            east_rounds.append(
+    if finals is None:
+        placeholder = _placeholder_series("Finals")
+        placeholder["conference"] = "Finals"
+        finals = {
+            "name": "NBA Finals",
+            "round_idx": 3,
+            "series": [
                 {
-                    "name": round_data.get("name"),
-                    "round_idx": round_idx,
-                    "series": east_entries,
+                    "series": placeholder,
+                    "round_idx": 3,
+                    "series_idx": 0,
+                    "high_seed_label": None,
+                    "low_seed_label": None,
                 }
-            )
-        if west_entries:
-            west_rounds.append(
-                {
-                    "name": round_data.get("name"),
-                    "round_idx": round_idx,
-                    "series": west_entries,
-                }
-            )
+            ],
+        }
 
     return {"east_rounds": east_rounds, "west_rounds": west_rounds, "finals": finals}
 

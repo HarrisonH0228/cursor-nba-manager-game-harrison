@@ -86,14 +86,23 @@ def validate_trade(
     if not all_out and not all_picks:
         return False, "Trade must include at least one asset."
 
+    user_roster_ids = {int(x) for x in season["rosters"].get(str(user_team_id), [])}
+    partner_roster_ids = {int(x) for x in season["rosters"].get(str(partner_team_id), [])}
+
     for player_id in outgoing_players:
-        player = lookup.get(int(player_id))
-        if not player or player.get("team_id") != user_team_id:
+        pid = int(player_id)
+        player = lookup.get(pid)
+        if not player or int(player.get("team_id") or -1) != int(user_team_id):
+            return False, "Outgoing player not on your roster."
+        if pid not in user_roster_ids:
             return False, "Outgoing player not on your roster."
 
     for player_id in incoming_players:
-        player = lookup.get(int(player_id))
-        if not player or player.get("team_id") != partner_team_id:
+        pid = int(player_id)
+        player = lookup.get(pid)
+        if not player or int(player.get("team_id") or -1) != int(partner_team_id):
+            return False, "Incoming player not on partner roster."
+        if pid not in partner_roster_ids:
             return False, "Incoming player not on partner roster."
 
     user_picks = {pick["id"]: pick for pick in season.get("draft_picks", {}).get(str(user_team_id), [])}
@@ -213,8 +222,8 @@ def execute_trade(
     if not ok:
         return False, message
 
-    user_roster = season["rosters"].setdefault(str(user_team_id), [])
-    partner_roster = season["rosters"].setdefault(str(partner_team_id), [])
+    user_roster = [int(x) for x in season["rosters"].setdefault(str(user_team_id), [])]
+    partner_roster = [int(x) for x in season["rosters"].setdefault(str(partner_team_id), [])]
 
     for player_id in outgoing_players:
         pid = int(player_id)
@@ -241,6 +250,9 @@ def execute_trade(
         elif pid in lookup:
             lookup[pid]["team_id"] = user_team_id
             lookup[pid]["team"] = team_name(season, user_team_id)
+
+    season["rosters"][str(user_team_id)] = user_roster
+    season["rosters"][str(partner_team_id)] = partner_roster
 
     user_pick_list = season["draft_picks"].setdefault(str(user_team_id), [])
     partner_pick_list = season["draft_picks"].setdefault(str(partner_team_id), [])
@@ -308,7 +320,10 @@ def execute_trade(
     except ImportError:
         pass
     from contracts import refresh_all_team_finances
+    from roster import repair_roster_sync
 
+    repair_roster_sync(season, user_team_id)
+    repair_roster_sync(season, partner_team_id)
     refresh_all_team_finances(season, lookup)
     return True, message
 

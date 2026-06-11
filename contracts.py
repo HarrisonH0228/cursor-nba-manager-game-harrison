@@ -274,6 +274,18 @@ def _apply_signing(season, team_id, player, salary, years, lookup):
     player["team"] = team_name(season, team_id)
     player.pop("asking_salary", None)
     refresh_all_team_finances(season, lookup)
+    try:
+        from news import append_news
+
+        append_news(
+            season,
+            "signing",
+            player=player.get("name", player_id),
+            team=team_name(season, team_id),
+            salary=salary,
+        )
+    except ImportError:
+        pass
 
 
 def propose_offer(season, team_id, player_id, salary, years):
@@ -307,17 +319,6 @@ def propose_offer(season, team_id, player_id, salary, years):
     if accepted:
         _apply_signing(season, team_id, player, salary, years, lookup)
         _sync_free_agents(season)
-        try:
-            from news import append_news
-            append_news(
-                season,
-                "signing",
-                player=player.get("name", player_id),
-                team=team_name(season, team_id),
-                salary=salary,
-            )
-        except ImportError:
-            pass
         return True, result_message, True
 
     try:

@@ -2,7 +2,7 @@
 
 import unittest
 
-from news import MAX_NEWS_ITEMS, append_news, news_headlines
+from news import MAX_NEWS_ITEMS, append_news, maybe_roll_rookie_news, news_headlines
 from news_templates import template_count
 
 
@@ -43,6 +43,48 @@ class NewsTests(unittest.TestCase):
         season = {"news_feed": ["A", "B", "A", "C", "B"]}
         headlines = news_headlines(season, limit=12)
         self.assertEqual(headlines, ["A", "B", "C"])
+
+    def test_rookie_headline_category(self):
+        season = {"news_feed": []}
+        headline = append_news(
+            season,
+            "rookie",
+            player="Hot Prospect",
+            team="Lakers",
+            overall=82,
+        )
+        self.assertIn(headline, season["news_feed"])
+        self.assertIn("Hot Prospect", headline)
+
+    def test_maybe_roll_rookie_news_with_standout(self):
+        import random
+
+        import cache
+        from attributes import apply_attributes
+        from ratings import apply_ratings
+        from season import init_season, league_lookup, roster_players
+
+        cache_data = cache.load_cache()
+        players = list(cache_data.get("players", []))
+        apply_ratings(players)
+        apply_attributes(players)
+        season = init_season(players, season_year=2026, rng=random.Random(1))
+        lookup = league_lookup(season)
+        team_id = int(next(iter(season["rosters"])))
+        roster = roster_players(season, team_id, lookup)
+        roster[0]["age"] = 20
+        roster[0]["overall"] = 88
+
+        class _AlwaysRoll:
+            def random(self):
+                return 0.0
+
+            def choice(self, seq):
+                return seq[0]
+
+        headline = maybe_roll_rookie_news(season, lookup, day=1, rng=_AlwaysRoll())
+        self.assertTrue(headline)
+        self.assertIn(headline, season["news_feed"])
 
     def test_news_headlines_pads_with_ambient_when_lookup_provided(self):
         import random

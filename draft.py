@@ -351,6 +351,14 @@ def make_pick(season, team_id, prospect=None, rng=None, auto_trim=False):
             team=team_name(season, team_id),
             player=prospect["name"],
         )
+        if (prospect.get("overall") or 0) >= 78:
+            append_news(
+                season,
+                "rookie",
+                player=prospect["name"],
+                team=team_name(season, team_id),
+                overall=prospect.get("overall", 78),
+            )
     except ImportError:
         pass
     from contracts import refresh_all_team_finances

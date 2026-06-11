@@ -141,16 +141,17 @@ def release_player(season, team_id, player_id, force=False):
 
     lookup = league_lookup(season)
     player = lookup.get(player_id)
-    roster = season.get("rosters", {}).get(str(team_id), [])
-    on_roster = player_id in roster
+    roster_list = [int(x) for x in season.get("rosters", {}).get(str(team_id), [])]
+    on_roster = player_id in roster_list
     player_team = _player_team_id(player) if player else None
 
     if not player or (not on_roster and player_team != team_id):
         return False, "Player is not on your roster."
 
-    roster_list = season["rosters"].setdefault(str(team_id), [])
+    roster_list = [int(x) for x in season["rosters"].setdefault(str(team_id), [])]
     if player_id in roster_list:
         roster_list.remove(player_id)
+    season["rosters"][str(team_id)] = roster_list
 
     player["team_id"] = None
     player["team"] = "Free Agent"

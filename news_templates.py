@@ -77,6 +77,18 @@ TEMPLATES = {
         "Final: {winner} {w_score}, {loser} {l_score}. Chaos reigns.",
         "{loser} stunned by {winner} ({w_score}-{l_score}). Film at 11.",
     ],
+    "rookie": [
+        "Rookie watch: {player} ({team}) already looks like a steal at {overall} OVR",
+        "League buzzing about {player} — {team}'s rookie is turning heads",
+        "Scouts rave about {player}; {team} may have found a franchise piece",
+        "Rookie sensation: {player} putting {team} on notice with elite flashes",
+        "{player} is {team}'s rookie gem — analytics Twitter in meltdown mode",
+        "Hot rookie alert: {player} ({team}) playing like a vet already",
+        "{team} rookie {player} drawing comparisons to 'someone good, probably'",
+        "Breakout rookie {player} has {team} fans refreshing the standings nightly",
+        "Rookie radar: {player} at {overall} OVR and climbing for {team}",
+        "{player} is the talk of the league — {team}'s draft pick paying off",
+    ],
     "draft": [
         "{team} selects {player}; scout notes: 'he looks fast in 2K'",
         "With the pick, {team} takes {player}. Twitter is undefeated.",

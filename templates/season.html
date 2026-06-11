@@ -37,21 +37,22 @@
 
 {% macro bracket_series_card(entry, user_team_id) %}
 {% set series = entry.series %}
-{% set is_user_series = user_team_id and (series.high_seed_id == user_team_id or series.low_seed_id == user_team_id) %}
-<div class="bracket-series{% if is_user_series %} user-series{% endif %}">
-  <div class="bracket-team{% if series.complete and series.winner_id == series.high_seed_id %} bracket-team-winner{% endif %}">
+{% set is_placeholder = series.get('placeholder') %}
+{% set is_user_series = not is_placeholder and user_team_id and (series.high_seed_id == user_team_id or series.low_seed_id == user_team_id) %}
+<div class="bracket-series{% if is_user_series %} user-series{% endif %}{% if is_placeholder %} bracket-series-placeholder{% endif %}{% if entry.grid_col is defined %} bracket-col-{{ entry.grid_col }}{% endif %}">
+  <div class="bracket-team{% if not is_placeholder and series.complete and series.winner_id == series.high_seed_id %} bracket-team-winner{% endif %}">
     {% if entry.high_seed_label %}<span class="bracket-seed">{{ entry.high_seed_label }}</span>{% endif %}
-    <img class="team-logo-sm" data-team-logo="{{ series.high_seed_name }}" alt="" onerror="this.style.display='none'">
+    {% if not is_placeholder %}<img class="team-logo-sm" data-team-logo="{{ series.high_seed_name }}" alt="" onerror="this.style.display='none'">{% endif %}
     <span class="bracket-team-name{% if user_team_id and series.high_seed_id == user_team_id %} bracket-team-you{% endif %}">{{ series.high_seed_name }}</span>
     {% if user_team_id and series.high_seed_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
-    <span class="bracket-wins">{{ series.high_wins }}</span>
+    {% if not is_placeholder %}<span class="bracket-wins">{{ series.high_wins }}</span>{% endif %}
   </div>
-  <div class="bracket-team{% if series.complete and series.winner_id == series.low_seed_id %} bracket-team-winner{% endif %}">
+  <div class="bracket-team{% if not is_placeholder and series.complete and series.winner_id == series.low_seed_id %} bracket-team-winner{% endif %}">
     {% if entry.low_seed_label %}<span class="bracket-seed">{{ entry.low_seed_label }}</span>{% endif %}
-    <img class="team-logo-sm" data-team-logo="{{ series.low_seed_name }}" alt="" onerror="this.style.display='none'">
+    {% if not is_placeholder %}<img class="team-logo-sm" data-team-logo="{{ series.low_seed_name }}" alt="" onerror="this.style.display='none'">{% endif %}
     <span class="bracket-team-name{% if user_team_id and series.low_seed_id == user_team_id %} bracket-team-you{% endif %}">{{ series.low_seed_name }}</span>
     {% if user_team_id and series.low_seed_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
-    <span class="bracket-wins">{{ series.low_wins }}</span>
+    {% if not is_placeholder %}<span class="bracket-wins">{{ series.low_wins }}</span>{% endif %}
   </div>
   {% if series.games %}
   <div class="bracket-games">
@@ -62,6 +63,8 @@
     </a>
     {% endfor %}
   </div>
+  {% elif is_placeholder %}
+  <div class="bracket-games bracket-games-pending"><span style="color:var(--text-muted);font-size:.75rem;">Awaiting winner</span></div>
   {% elif not series.complete and series.high_wins == 0 and series.low_wins == 0 %}
   <div class="bracket-games bracket-games-pending"><span style="color:var(--text-muted);font-size:.75rem;">Not started</span></div>
   {% endif %}
@@ -161,14 +164,24 @@
   <div class="playoff-bracket">
     <div class="bracket-side bracket-side-east">
       <div class="bracket-side-label"><span class="badge-nba badge-nba-red">East</span></div>
-      {% for round in bracket.east_rounds %}
-      <div class="bracket-round">
-        <div class="bracket-round-name">{{ round.name }}</div>
-        {% for entry in round.series %}
-        {{ bracket_series_card(entry, user_team_id) }}
-        {% endfor %}
+      <div class="bracket-tree-wrap">
+        <div class="bracket-col-headers">
+          {% for round in bracket.east_rounds %}
+          <div class="bracket-col-header bracket-col-{{ round.series[0].grid_col if round.series else loop.index }}" title="{{ round.name }}">
+            <span class="bracket-round-name">{{ round.name }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="bracket-tree-grid">
+          {% for round in bracket.east_rounds %}
+            {% for entry in round.series %}
+            <div class="bracket-grid-cell" style="grid-row: {{ entry.grid_row }}; grid-column: {{ entry.grid_col }};">
+              {{ bracket_series_card(entry, user_team_id) }}
+            </div>
+            {% endfor %}
+          {% endfor %}
+        </div>
       </div>
-      {% endfor %}
     </div>
 
     {% if bracket.finals %}
@@ -185,14 +198,24 @@
 
     <div class="bracket-side bracket-side-west">
       <div class="bracket-side-label"><span class="badge-nba badge-nba-blue">West</span></div>
-      {% for round in bracket.west_rounds|reverse %}
-      <div class="bracket-round">
-        <div class="bracket-round-name">{{ round.name }}</div>
-        {% for entry in round.series %}
-        {{ bracket_series_card(entry, user_team_id) }}
-        {% endfor %}
+      <div class="bracket-tree-wrap">
+        <div class="bracket-col-headers bracket-col-headers-west">
+          {% for round in bracket.west_rounds %}
+          <div class="bracket-col-header bracket-col-{{ round.series[0].grid_col if round.series else loop.index }}" title="{{ round.name }}">
+            <span class="bracket-round-name">{{ round.name }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="bracket-tree-grid">
+          {% for round in bracket.west_rounds %}
+            {% for entry in round.series %}
+            <div class="bracket-grid-cell" style="grid-row: {{ entry.grid_row }}; grid-column: {{ entry.grid_col }};">
+              {{ bracket_series_card(entry, user_team_id) }}
+            </div>
+            {% endfor %}
+          {% endfor %}
+        </div>
       </div>
-      {% endfor %}
     </div>
   </div>
 </div>
