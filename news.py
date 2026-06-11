@@ -55,27 +55,55 @@ _TEMPLATES = {
         "{team} traded a pick for a {year} R{round} future pick. Time travel confirmed.",
         "Draft trade: {team} swaps picks for {year} R{round}. GM playing 4D chess (probably).",
     ],
+    "championship": [
+        "CHAMPIONS: {team} win the NBA Finals — Larry O'Brien trophy secured",
+        "{team} capture the title. Parade planning already underway.",
+        "NBA Finals: {team} hoist the trophy. Confetti budget: unlimited.",
+    ],
 }
 
 
-def _format_headline(category, context):
+def _format_headline(season, category, context):
     templates = _TEMPLATES.get(category, ["{team} did something."])
-    template = random.choice(templates)
+    indices = season.setdefault("news_template_index", {})
+    start = indices.get(category, 0)
     safe = {k: str(v) for k, v in context.items() if v is not None}
-    try:
-        return template.format(**safe)
-    except KeyError:
-        return template
+    feed = season.get("news_feed", [])
+    existing = set(feed)
+
+    for offset in range(len(templates)):
+        idx = (start + offset) % len(templates)
+        template = templates[idx]
+        try:
+            headline = template.format(**safe)
+        except KeyError:
+            headline = template
+        if headline not in existing:
+            indices[category] = (idx + 1) % len(templates)
+            return headline
+
+    return None
 
 
 def append_news(season, category, **context):
     """Push a headline onto season news_feed (newest first)."""
     feed = season.setdefault("news_feed", [])
-    headline = _format_headline(category, context)
+    headline = _format_headline(season, category, context)
+    if not headline or headline in feed:
+        return headline or ""
     feed.insert(0, headline)
     season["news_feed"] = feed[:MAX_NEWS_ITEMS]
     return headline
 
 
 def news_headlines(season, limit=12):
-    return list(season.get("news_feed", [])[:limit])
+    seen = set()
+    unique = []
+    for headline in season.get("news_feed", []):
+        if headline in seen:
+            continue
+        seen.add(headline)
+        unique.append(headline)
+        if len(unique) >= limit:
+            break
+    return unique

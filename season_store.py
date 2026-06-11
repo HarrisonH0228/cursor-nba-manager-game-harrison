@@ -24,6 +24,7 @@ DEFAULT_SEASON = {
     "team_finances": {},
     "pending_fa_offers": {},
     "free_agents": [],
+    "championships": {},
 }
 
 

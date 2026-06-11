@@ -34,7 +34,7 @@
         <!-- Team badge -->
         <div class="navbar-team-badge me-2">
           <img class="navbar-team-logo" src="" alt="" id="nav-team-logo" onerror="this.style.display='none'">
-          <span id="nav-team-name">{{ game.team_name }}</span>
+          <span id="nav-team-name">{{ game.team_name }}{% include "_championship_badge.html" %}</span>
         </div>
 
         <a class="nav-link-nba" href="{{ url_for('index') }}">Dashboard</a>

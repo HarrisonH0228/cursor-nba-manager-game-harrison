@@ -19,6 +19,7 @@ from season import (
     advance_playoff_round,
     advance_season,
     can_trade,
+    championship_count,
     enrich_game_for_display,
     find_schedule_game,
     games_played_count,
@@ -258,13 +259,18 @@ def _known_team_ids(all_players):
 @app.context_processor
 def inject_game():
     _, season_data = load_session_season()
+    game = get_game()
     headlines = news_headlines(season_data) if season_data else []
+    user_championships = (
+        championship_count(season_data, game["team_id"]) if game and season_data else 0
+    )
     return {
-        "game": get_game(),
+        "game": game,
         "active_season": season_data,
         "positions_label": positions_label,
         "max_roster": MAX_ROSTER,
         "news_headlines": headlines,
+        "user_championships": user_championships,
     }
 
 

@@ -145,6 +145,8 @@ def migrate_season(season, rng=None):
         team_ids = [int(team_id) for team_id in season.get("rosters", {}).keys()]
         draft_year = season.get("season_year", 2026) + 2
         season["future_draft_picks"] = init_draft_picks(team_ids, draft_year)
+    if "championships" not in season:
+        season["championships"] = {}
     from roster import repair_roster_sync
 
     repair_roster_sync(season)
@@ -255,6 +257,7 @@ def init_season(players, season_year=2026, rng=None):
         "pending_fa_offers": {},
         "injury_log": [],
         "pending_notifications": [],
+        "championships": {},
     }
     _cap_team_rosters(season)
     from roster import _sync_free_agents
@@ -588,6 +591,26 @@ def team_name(season, team_id):
     return standing.get("team_name", str(team_id))
 
 
+def championship_count(season, team_id):
+    if not season or not team_id:
+        return 0
+    return int(season.get("championships", {}).get(str(team_id), 0))
+
+
+def record_championship(season, team_id):
+    championships = season.setdefault("championships", {})
+    key = str(team_id)
+    championships[key] = championships.get(key, 0) + 1
+    season["championships"] = championships
+    try:
+        from news import append_news
+
+        append_news(season, "championship", team=team_name(season, team_id))
+    except ImportError:
+        pass
+    return championships[key]
+
+
 def standings_table(season, conference=None):
     rows = []
     for team_id_str, record in season.get("standings", {}).items():
@@ -723,39 +746,20 @@ def _record_result(season, game, result):
 
 
 def _play_game(season, game, lookup, rng, user_team_id=None):
-    from injuries import injured_player_ids, roll_game_injuries, tick_injuries_after_game
+    from injuries import build_dnp_list, game_exclude_ids, roll_game_injuries, tick_injuries_after_game
 
     home_roster = roster_players(season, game["home_id"], lookup)
     away_roster = roster_players(season, game["away_id"], lookup)
     day = game.get("day", season.get("current_day", 1))
 
-    user_team_id = user_team_id or season.get("user_team_id")
-    if user_team_id and int(game["home_id"]) == int(user_team_id):
-        roll_game_injuries(season, game["home_id"], home_roster, day, rng)
-    elif user_team_id and int(game["away_id"]) == int(user_team_id):
-        roll_game_injuries(season, game["away_id"], away_roster, day, rng)
+    roll_game_injuries(season, game["home_id"], home_roster, day, rng)
+    roll_game_injuries(season, game["away_id"], away_roster, day, rng)
 
-    home_injured = injured_player_ids(home_roster)
-    away_injured = injured_player_ids(away_roster)
+    home_exclude = game_exclude_ids(home_roster)
+    away_exclude = game_exclude_ids(away_roster)
 
-    game["home_dnp"] = [
-        {
-            "player_id": player["id"],
-            "name": player.get("name", str(player["id"])),
-            "reason": (player.get("injury") or {}).get("type", "injury"),
-        }
-        for player in home_roster
-        if player["id"] in home_injured
-    ]
-    game["away_dnp"] = [
-        {
-            "player_id": player["id"],
-            "name": player.get("name", str(player["id"])),
-            "reason": (player.get("injury") or {}).get("type", "injury"),
-        }
-        for player in away_roster
-        if player["id"] in away_injured
-    ]
+    game["home_dnp"] = build_dnp_list(home_roster, home_exclude)
+    game["away_dnp"] = build_dnp_list(away_roster, away_exclude)
 
     home_gp = season["standings"][str(game["home_id"])].get("gp", 0)
     away_gp = season["standings"][str(game["away_id"])].get("gp", 0)
@@ -765,8 +769,8 @@ def _play_game(season, game, lookup, rng, user_team_id=None):
         rng,
         home_team_gp=home_gp,
         away_team_gp=away_gp,
-        home_exclude_ids=home_injured,
-        away_exclude_ids=away_injured,
+        home_exclude_ids=home_exclude,
+        away_exclude_ids=away_exclude,
     )
     _record_result(season, game, result)
 
@@ -961,14 +965,37 @@ def _series_label(series):
 
 
 def _simulate_series(series, season, lookup, rng):
+    from injuries import game_exclude_ids, roll_game_injuries, tick_injuries_after_game
+
+    day = season.get("current_day", season.get("max_day", 82))
     while series["high_wins"] < PLAYOFF_WINS_NEEDED and series["low_wins"] < PLAYOFF_WINS_NEEDED:
         home_roster = roster_players(season, series["high_seed_id"], lookup)
         away_roster = roster_players(season, series["low_seed_id"], lookup)
-        home_score, away_score = simulate_game(home_roster, away_roster, rng)
-        if home_score > away_score:
+
+        roll_game_injuries(season, series["high_seed_id"], home_roster, day, rng)
+        roll_game_injuries(season, series["low_seed_id"], away_roster, day, rng)
+
+        home_exclude = game_exclude_ids(home_roster)
+        away_exclude = game_exclude_ids(away_roster)
+        home_gp = season["standings"][str(series["high_seed_id"])].get("gp", 0)
+        away_gp = season["standings"][str(series["low_seed_id"])].get("gp", 0)
+        result = simulate_game_with_box_score(
+            home_roster,
+            away_roster,
+            rng,
+            home_team_gp=home_gp,
+            away_team_gp=away_gp,
+            home_exclude_ids=home_exclude,
+            away_exclude_ids=away_exclude,
+        )
+        if result["home_score"] > result["away_score"]:
             series["high_wins"] += 1
         else:
             series["low_wins"] += 1
+
+        tick_injuries_after_game(home_roster)
+        tick_injuries_after_game(away_roster)
+        day += 1
 
     if series["high_wins"] > series["low_wins"]:
         series["winner_id"] = series["high_seed_id"]
@@ -1043,9 +1070,10 @@ def advance_playoff_round(season, lookup, rng=None):
     winners = [_winner_row(series) for series in current_round["series"]]
     next_index = round_index + 1
     if next_index >= len(rounds):
-        if winners:
+        if winners and season.get("phase") != "complete":
             playoffs["champion_id"] = winners[0]["team_id"]
             playoffs["champion_name"] = winners[0]["team_name"]
+            record_championship(season, winners[0]["team_id"])
             season["phase"] = "complete"
         return series_played
 

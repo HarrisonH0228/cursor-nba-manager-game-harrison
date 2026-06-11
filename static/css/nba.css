@@ -748,20 +748,25 @@ form.d-inline { display: inline !important; }
   align-items: center;
   font-size: 0.82rem;
   border-bottom: 1px solid #333;
+  position: relative;
 }
 .news-ticker-label {
-  background: #fff;
-  color: #111;
+  background: #C8102E;
+  color: #fff;
   font-weight: 800;
   padding: 0.45rem 0.75rem;
   letter-spacing: 0.08em;
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 }
 .news-ticker-track {
   display: inline-flex;
   gap: 3rem;
-  animation: ticker-scroll 40s linear infinite;
+  animation: ticker-scroll 90s linear infinite;
   padding: 0.45rem 0;
+  position: relative;
+  z-index: 1;
 }
 .news-ticker-item {
   display: inline-block;
@@ -770,4 +775,25 @@ form.d-inline { display: inline !important; }
 @keyframes ticker-scroll {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
+}
+
+/* ── Championship trophy badge ── */
+.championship-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  color: #fbbf24;
+}
+.championship-trophy-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.championship-count {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #fbbf24;
+  line-height: 1;
 }

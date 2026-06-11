@@ -6,7 +6,7 @@
   <img class="team-logo-xl" data-team-logo="{{ team_name }}" alt="{{ team_name }}" onerror="this.style.display='none'">
   <div>
     <p class="section-title">General Manager Dashboard</p>
-    <h1 style="font-size:2.5rem;font-weight:900;letter-spacing:-0.04em;margin-bottom:.25rem;">{{ team_name }}</h1>
+    <h1 style="font-size:2.5rem;font-weight:900;letter-spacing:-0.04em;margin-bottom:.25rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">{{ team_name }}{% include "_championship_badge.html" %}</h1>
     {% if last_updated %}
     <p class="text-muted-nba" style="font-size:0.8rem;">Data updated {{ last_updated }}</p>
     {% endif %}

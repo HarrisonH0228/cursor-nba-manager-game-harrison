@@ -6,7 +6,7 @@
   <img class="team-logo-lg" data-team-logo="{{ team_name }}" alt="{{ team_name }}" onerror="this.style.display='none'">
   <div style="flex:1;min-width:200px;">
     <p class="section-title">My Team</p>
-    <h1 style="font-size:2rem;font-weight:900;letter-spacing:-0.03em;margin-bottom:.25rem;">{{ team_name }}</h1>
+    <h1 style="font-size:2rem;font-weight:900;letter-spacing:-0.03em;margin-bottom:.25rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">{{ team_name }}{% include "_championship_badge.html" %}</h1>
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-bottom:.35rem;">
       {% if team_overall is not none %}
       <span data-ovr="{{ team_overall }}">{{ team_overall }}</span>

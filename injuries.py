@@ -19,6 +19,7 @@ INJURY_TYPES = (
 
 INJURY_CHANCE_PER_GAME = 0.008
 SEVERE_INJURY_CHANCE = 0.15
+MIN_GAME_PLAYERS = 5
 
 
 def player_is_injured(player) -> bool:
@@ -30,6 +31,40 @@ def player_is_injured(player) -> bool:
 
 def injured_player_ids(roster) -> set[int]:
     return {player["id"] for player in roster if player_is_injured(player)}
+
+
+def game_exclude_ids(roster, min_players=MIN_GAME_PLAYERS) -> set[int]:
+    """Injured ids to exclude; activate injured with lowest games_remaining if too few healthy."""
+    injured = {
+        player["id"]: int((player.get("injury") or {}).get("games_remaining") or 0)
+        for player in roster
+        if player_is_injured(player)
+    }
+    if not injured:
+        return set()
+
+    excluded = set(injured.keys())
+    available = len(roster) - len(excluded)
+    target = min(min_players, len(roster))
+
+    while available < target and excluded:
+        activate_id = min(excluded, key=lambda player_id: injured[player_id])
+        excluded.discard(activate_id)
+        available += 1
+
+    return excluded
+
+
+def build_dnp_list(roster, exclude_ids):
+    return [
+        {
+            "player_id": player["id"],
+            "name": player.get("name", str(player["id"])),
+            "reason": (player.get("injury") or {}).get("type", "injury"),
+        }
+        for player in roster
+        if player["id"] in exclude_ids
+    ]
 
 
 def _injury_duration(rng, severe):
