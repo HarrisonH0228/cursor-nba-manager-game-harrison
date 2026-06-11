@@ -15,7 +15,8 @@ MIN_ATTR = 25
 MAX_ATTR = 99
 TEAM_MINUTES = 240
 ROTATION_SIZE = 8
-GAME_NOISE_STDEV = 0.25
+GAME_NOISE_STDEV = 0.40
+LEAGUE_SKILL_SCALE = 0.88
 CAREER_START_AGE = 19
 CAREER_START_MULTIPLIER = 0.78
 PEAK_AGE_MIN = 28
@@ -50,14 +51,14 @@ STAT_FROM_ATTR = {
     "ppg": ("scoring", 0.29),
     "rpg": ("rebounding", 0.16),
     "apg": ("playmaking", 0.20),
-    "spg": ("defense", 0.025),
-    "bpg": ("defense", 0.015),
+    "spg": ("defense", 0.038),
+    "bpg": ("defense", 0.022),
 }
 
 STAT_DISPLAY_CAPS = {
-    "ppg": 32.0,
-    "rpg": 16.0,
-    "apg": 13.0,
+    "ppg": 24.0,
+    "rpg": 14.0,
+    "apg": 11.0,
     "spg": 3.5,
     "bpg": 4.0,
 }
@@ -227,13 +228,13 @@ def derive_attributes(player, percentiles=None, overall=None):
     positions = ensure_positions(player)
 
     if gp < MIN_GAMES_FOR_RATINGS:
-        base = overall * 0.85
+        base = overall * 0.85 * LEAGUE_SKILL_SCALE
         attrs = {
             "scoring": _clamp(base + (player.get("ppg") or 0)),
             "playmaking": _clamp(base * 0.7 + (player.get("apg") or 0) * 3),
             "rebounding": _clamp(base * 0.7 + (player.get("rpg") or 0) * 2),
             "defense": _clamp(base * 0.75 + (player.get("spg") or 0) * 8 + (player.get("bpg") or 0) * 10),
-            "efficiency": _clamp(overall * 0.9),
+            "efficiency": _clamp(overall * 0.9 * LEAGUE_SKILL_SCALE),
             "stamina": _stamina_from_player(player),
         }
         return _apply_position_attr_bias(attrs, positions)
@@ -243,10 +244,10 @@ def derive_attributes(player, percentiles=None, overall=None):
     defense_pct = spg_pct * 0.55 + bpg_pct * 0.45
 
     attrs = {
-        "scoring": _blend(percentiles.get("ppg"), overall),
-        "playmaking": _blend(percentiles.get("apg"), overall),
-        "rebounding": _blend(percentiles.get("rpg"), overall),
-        "defense": _blend(defense_pct, overall),
+        "scoring": _blend(percentiles.get("ppg"), overall * LEAGUE_SKILL_SCALE),
+        "playmaking": _blend(percentiles.get("apg"), overall * LEAGUE_SKILL_SCALE),
+        "rebounding": _blend(percentiles.get("rpg"), overall * LEAGUE_SKILL_SCALE),
+        "defense": _blend(defense_pct, overall * LEAGUE_SKILL_SCALE),
         "efficiency": _efficiency_from_player(player, percentiles),
         "stamina": _stamina_from_player(player),
     }
@@ -268,7 +269,7 @@ def needs_attributes(players):
 
 def generate_rookie_profile(overall, rng=None):
     rng = rng or random.Random()
-    base = overall * 0.9
+    base = overall * 0.82
     spread = rng.uniform(-8, 8)
     archetype = rng.random()
 
@@ -333,9 +334,11 @@ def season_averages_from_attributes(attributes, rng=None, player=None):
 def season_averages_from_attributes_deterministic(attributes, player=None):
     multipliers = position_stat_multipliers(ensure_positions(player) if player else [])
     stat_mods = player.get("stat_modifiers", {}) if player else {}
+    season_form = player.get("season_form", 1.0) if player else 1.0
     stats = {}
     for stat, (attr_key, scale) in STAT_FROM_ATTR.items():
         value = attributes[attr_key] * scale * multipliers.get(stat, 1.0) * stat_mods.get(stat, 1.0)
+        value *= season_form
         cap = STAT_DISPLAY_CAPS.get(stat)
         if cap is not None:
             value = min(value, cap)
@@ -374,21 +377,63 @@ def _scale_base_attributes(effective_attrs, multiplier, stamina_multiplier=None)
     return base
 
 
+def _assign_rookie_potential(player, rng):
+    scout = player.get("scout_grade") or player.get("overall") or 50
+    arc = player.get("career_arc", "role")
+
+    if arc == "generational":
+        upside = rng.randint(18, 30)
+    elif arc == "star":
+        upside = rng.randint(15, 25)
+    elif arc == "bust":
+        upside = rng.randint(0, 3)
+    elif arc == "starter":
+        upside = rng.randint(5, 14)
+    else:
+        upside = rng.randint(2, 10)
+
+    player["potential"] = _clamp(scout + upside, POTENTIAL_MIN, POTENTIAL_MAX)
+    if player.get("development_rate") is None:
+        if arc in ("generational", "star"):
+            player["development_rate"] = round(rng.uniform(1.0, 1.2), 3)
+        elif arc == "bust":
+            player["development_rate"] = round(rng.uniform(0.7, 0.9), 3)
+        else:
+            player["development_rate"] = round(rng.uniform(0.85, 1.15), 3)
+
+
 def _assign_potential(player, rng):
     if player.get("potential") is not None:
         return
+    if player.get("is_rookie"):
+        _assign_rookie_potential(player, rng)
+        return
+
     overall = player.get("overall") or 50
     age = player.get("age") or 25
     peak_age = player.get("peak_age") or DEFAULT_PEAK_AGE
-    if player.get("is_rookie"):
-        upside = rng.randint(5, 25)
-        player["potential"] = _clamp(overall + upside, POTENTIAL_MIN, POTENTIAL_MAX)
-    else:
-        years_to_peak = max(0, peak_age - age)
-        spread = rng.randint(0, 12) + min(years_to_peak, 8)
-        player["potential"] = _clamp(overall + spread, POTENTIAL_MIN, POTENTIAL_MAX)
+    years_to_peak = max(0, peak_age - age)
+    spread = rng.randint(0, 12) + min(years_to_peak, 8)
+    player["potential"] = _clamp(overall + spread, POTENTIAL_MIN, POTENTIAL_MAX)
     if player.get("development_rate") is None:
         player["development_rate"] = round(rng.uniform(0.85, 1.15), 3)
+
+
+def _assign_ceiling_factor(player, rng):
+    if player.get("ceiling_factor") is not None:
+        return
+    player_rng = _player_rng(player, rng)
+    arc = player.get("career_arc", "role")
+    if arc == "generational":
+        player["ceiling_factor"] = round(player_rng.uniform(1.0, 1.05), 3)
+    elif arc == "star":
+        player["ceiling_factor"] = round(player_rng.uniform(0.98, 1.05), 3)
+    elif arc == "bust":
+        player["ceiling_factor"] = round(player_rng.uniform(0.85, 0.92), 3)
+    elif arc == "starter":
+        player["ceiling_factor"] = round(player_rng.uniform(0.92, 0.98), 3)
+    else:
+        player["ceiling_factor"] = round(player_rng.uniform(0.88, 0.96), 3)
 
 
 def _assign_stat_modifiers(player, rng):
@@ -396,15 +441,17 @@ def _assign_stat_modifiers(player, rng):
         return
     player_rng = _player_rng(player, rng)
     player["stat_modifiers"] = {
-        stat: round(player_rng.uniform(0.94, 1.06), 3) for stat in STAT_FROM_ATTR
+        stat: round(player_rng.uniform(0.82, 1.18), 3) for stat in STAT_FROM_ATTR
     }
 
 
 def _assign_peak_attributes(player, rng):
     if player.get("peak_attributes"):
         return
+    _assign_ceiling_factor(player, rng)
     player_rng = _player_rng(player, rng)
     potential = player.get("potential") or player.get("overall") or 50
+    ceiling_factor = player.get("ceiling_factor", 1.0)
     positions = ensure_positions(player)
     weights = _position_attr_bias(positions)
     weight_sum = sum(weights.get(key, 1.0) for key in ATTRIBUTE_KEYS if key != "stamina")
@@ -414,12 +461,16 @@ def _assign_peak_attributes(player, rng):
     peak = {}
     for key in ATTRIBUTE_KEYS:
         if key == "stamina":
-            peak[key] = _clamp(potential * 0.95 + player_rng.randint(-3, 3))
+            peak[key] = _clamp((potential * 0.95 + player_rng.randint(-3, 3)) * ceiling_factor)
             continue
         share = weights.get(key, 1.0) / weight_sum
         base = potential * (0.75 + share * 0.35)
         spread = player_rng.randint(-6, 6)
-        peak[key] = _clamp(base + spread, MIN_ATTR, min(MAX_ATTR, potential + 5))
+        peak[key] = _clamp(
+            (base + spread) * ceiling_factor,
+            MIN_ATTR,
+            min(MAX_ATTR, potential + 5),
+        )
     player["peak_attributes"] = peak
 
 
@@ -455,12 +506,33 @@ def _apply_development(player, rng):
         base[key] = _clamp(min(current + delta, ceiling))
 
 
+def _roll_season_form(rng):
+    roll = rng.random()
+    if roll < 0.25:
+        return round(rng.uniform(0.82, 0.94), 3)
+    if roll < 0.40:
+        return round(rng.uniform(1.06, 1.15), 3)
+    return round(rng.uniform(0.95, 1.05), 3)
+
+
 def _apply_seasonal_noise(player, rng):
     base = player.get("base_attributes")
     if not base:
         return
-    key = rng.choice(list(ATTRIBUTE_KEYS))
-    base[key] = _clamp(base.get(key, MIN_ATTR) + rng.randint(-3, 3))
+
+    player["season_form"] = _roll_season_form(rng)
+
+    keys = list(ATTRIBUTE_KEYS)
+    rng.shuffle(keys)
+    for key in keys[: rng.randint(2, 3)]:
+        base[key] = _clamp(base.get(key, MIN_ATTR) + rng.randint(-5, 5))
+
+    if rng.random() < 0.12:
+        injury_key = rng.choice(list(ATTRIBUTE_KEYS))
+        base[injury_key] = _clamp(base.get(injury_key, MIN_ATTR) + rng.randint(-8, -4))
+        player["off_season_note"] = "injury"
+    else:
+        player.pop("off_season_note", None)
 
 
 def init_career_profile(player, rng=None):
@@ -474,6 +546,11 @@ def init_career_profile(player, rng=None):
         player["peak_age"] = rng.randint(PEAK_AGE_MIN, PEAK_AGE_MAX)
     if player.get("retirement_age") is None:
         player["retirement_age"] = rng.randint(RETIRE_AGE_MIN, RETIRE_AGE_MAX)
+
+    if player.get("season_form") is None:
+        player["season_form"] = 1.0
+    if not player.get("career_arc"):
+        player["career_arc"] = "starter" if (player.get("overall") or 0) >= 75 else "role"
 
     _assign_potential(player, rng)
     _assign_peak_attributes(player, rng)
@@ -576,11 +653,14 @@ def apply_season_aging(season, rng=None):
     return retirements
 
 
-def init_rookie_career_profile(player, effective_attrs, rng=None):
+def init_rookie_career_profile(player, effective_attrs, rng=None, scout_grade=None):
     rng = rng or random.Random()
+    if scout_grade is not None:
+        player["scout_grade"] = scout_grade
     player["peak_age"] = rng.randint(PEAK_AGE_MIN, PEAK_AGE_MAX)
     player["retirement_age"] = rng.randint(RETIRE_AGE_MIN, RETIRE_AGE_MAX)
     player["season_gp"] = 0
+    player["season_form"] = 1.0
     _assign_potential(player, rng)
     _assign_peak_attributes(player, rng)
     _assign_stat_modifiers(player, rng)
@@ -612,10 +692,13 @@ def get_attributes(player):
     return derive_attributes(player)
 
 
-def allocate_minutes(roster):
-    pool = team_rating_pool(roster)
+def allocate_minutes(roster, rng=None, exclude_player_ids=None):
+    rng = rng or random.Random()
+    exclude_player_ids = exclude_player_ids or set()
+    eligible = [player for player in roster if player["id"] not in exclude_player_ids]
+    pool = team_rating_pool(eligible)
     if not pool:
-        pool = sorted(roster, key=lambda player: player.get("overall") or 0, reverse=True)
+        pool = sorted(eligible, key=lambda player: player.get("overall") or 0, reverse=True)
 
     rotation = pool[:ROTATION_SIZE]
     if not rotation:
@@ -633,9 +716,12 @@ def allocate_minutes(roster):
     for index, (player, weight) in enumerate(zip(rotation, weights)):
         raw = TEAM_MINUTES * weight / total_weight
         if index < 5:
-            raw = max(raw, 22)
+            floor = rng.randint(18, 24)
+            raw = max(raw, floor)
         else:
             raw = min(max(raw, 8), 22)
+        if rng.random() < 0.12:
+            raw *= rng.uniform(0.75, 0.92)
         minutes[player["id"]] = round(raw)
 
     minute_total = sum(minutes.values())
@@ -676,6 +762,87 @@ def _largest_remainder(total, weights):
     for _, index in fractions[:remainder]:
         floors[index] += 1
     return floors
+
+
+def _team_pace_factor(roster):
+    pool = team_rating_pool(roster)
+    if not pool:
+        pool = sorted(roster, key=lambda player: player.get("overall") or 0, reverse=True)
+    rotation = pool[:ROTATION_SIZE]
+    if not rotation:
+        return 1.0
+    scoring_sum = 0.0
+    efficiency_sum = 0.0
+    for player in rotation:
+        attrs = get_attributes(player)
+        scoring_sum += attrs.get("scoring", 50)
+        efficiency_sum += attrs.get("efficiency", 50)
+    count = len(rotation)
+    combined = (scoring_sum + efficiency_sum) / (2 * count)
+    return max(0.88, min(1.14, 0.82 + combined / 120))
+
+
+def _project_player_game_stats(player, minutes, rng, performance_factor=1.0):
+    effective = get_attributes(player)
+    stats = season_averages_from_attributes_deterministic(effective, player)
+    minute_scale = minutes / 36.0
+    projected = {}
+    for stat in STAT_FROM_ATTR:
+        base = stats.get(stat, 0) * minute_scale * performance_factor
+        noisy = base * rng.uniform(1 - GAME_NOISE_STDEV, 1 + GAME_NOISE_STDEV)
+        projected[stat] = max(0, round(noisy))
+    return {
+        "pts": projected["ppg"],
+        "reb": projected["rpg"],
+        "ast": projected["apg"],
+        "stl": projected["spg"],
+        "blk": projected["bpg"],
+    }
+
+
+def simulate_team_box_score_from_roster(roster, rng, pace_factor=1.0, exclude_player_ids=None):
+    exclude_player_ids = exclude_player_ids or set()
+    minutes_map = allocate_minutes(roster, rng=rng, exclude_player_ids=exclude_player_ids)
+    active = [
+        player
+        for player in roster
+        if minutes_map.get(player["id"], 0) > 0 and player["id"] not in exclude_player_ids
+    ]
+    if not active:
+        return [], 0
+
+    performance_factors = {
+        player["id"]: rng.uniform(0.65, 1.35) for player in active
+    }
+    box = []
+    total_pts = 0
+    for player in active:
+        mins = minutes_map[player["id"]]
+        perf = performance_factors[player["id"]]
+        stats = _project_player_game_stats(player, mins, rng, performance_factor=perf)
+        stats["pts"] = max(0, round(stats["pts"] * pace_factor))
+        total_pts += stats["pts"]
+        box.append(
+            {
+                "player_id": player["id"],
+                "name": player.get("name", str(player["id"])),
+                "min": mins,
+                "pts": stats["pts"],
+                "reb": stats["reb"],
+                "ast": stats["ast"],
+                "stl": stats["stl"],
+                "blk": stats["blk"],
+            }
+        )
+
+    box.sort(key=lambda line: line["pts"], reverse=True)
+    return box, total_pts
+
+
+def _adjust_box_score_points(box, delta):
+    if not box or delta == 0:
+        return
+    box[0]["pts"] = max(0, box[0]["pts"] + delta)
 
 
 def _build_team_box_score(roster, team_score, rng):

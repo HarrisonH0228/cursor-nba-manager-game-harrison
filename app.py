@@ -41,8 +41,10 @@ from draft import (
     make_pick,
     sim_draft_to_user_pick,
     sim_rest_of_draft,
+    skip_pick,
     start_draft,
 )
+from injuries import drain_pending_notifications
 from roster import (
     MAX_ROSTER,
     can_remove_player,
@@ -741,6 +743,13 @@ def _save_season(season_id, season_data):
     save_session_season(season_id, season_data)
 
 
+def _flash_injury_notifications(season_data):
+    if not season_data:
+        return
+    for message in drain_pending_notifications(season_data):
+        flash(message, "warning")
+
+
 def _render_season(season_id, season_data, lookup, game, page="hub", schedule_day=None):
     east_standings = standings_table(season_data, conference="East") if season_data else []
     west_standings = standings_table(season_data, conference="West") if season_data else []
@@ -813,6 +822,7 @@ def season_sim_full():
 
     count = sim_rest_of_season(season_data, lookup)
     _save_season(season_id, season_data)
+    _flash_injury_notifications(season_data)
     flash(f"Simulated {count} games. Regular season complete.")
     return redirect(url_for("season_hub"))
 
@@ -884,6 +894,7 @@ def season_sim_day():
 
     count = sim_day(season_data, lookup)
     _save_season(season_id, season_data)
+    _flash_injury_notifications(season_data)
     flash(f"Simulated day {season_data.get('current_day', 1) - 1}: {count} games.")
     return redirect(url_for("season_hub"))
 
@@ -901,6 +912,7 @@ def season_sim_week():
 
     count = sim_week(season_data, lookup)
     _save_season(season_id, season_data)
+    _flash_injury_notifications(season_data)
     flash(f"Simulated one week: {count} games.")
     return redirect(url_for("season_hub"))
 
@@ -918,6 +930,7 @@ def season_sim_trade_deadline():
 
     count = sim_to_trade_deadline(season_data, lookup)
     _save_season(season_id, season_data)
+    _flash_injury_notifications(season_data)
     flash(f"Simulated to trade deadline (~55 GP): {count} games.")
     return redirect(url_for("season_hub"))
 
@@ -1074,6 +1087,24 @@ def season_draft_pick():
     ok, message = make_pick(season_data, game["team_id"], prospect=prospect)
     _save_season(season_id, season_data)
     flash(message if ok else message)
+    return redirect(url_for("season_draft"))
+
+
+@app.route("/season/draft/skip", methods=["POST"])
+def season_draft_skip():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None or season_data.get("phase") != "draft":
+        flash("No draft in progress.")
+        return redirect(url_for("season_draft"))
+
+    ok, message = skip_pick(season_data, game["team_id"])
+    _save_season(season_id, season_data)
+    flash(message)
     return redirect(url_for("season_draft"))
 
 

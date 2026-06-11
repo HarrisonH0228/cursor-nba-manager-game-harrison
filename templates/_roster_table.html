@@ -26,7 +26,12 @@
     <tbody>
       {% for player in roster %}
       <tr>
-        <td style="font-weight:600;">{{ player.name }}</td>
+        <td style="font-weight:600;">
+          {{ player.name }}
+          {% if player.injury and player.injury.games_remaining %}
+          <span class="badge-nba badge-nba-red" style="font-size:.65rem;margin-left:.35rem;">OUT {{ player.injury.games_remaining }}G</span>
+          {% endif %}
+        </td>
         <td>
           {% if player.overall is not none %}
           <span data-ovr="{{ player.overall }}" class="ovr-chip {% if player.overall >= 85 %}ovr-elite{% elif player.overall >= 78 %}ovr-great{% elif player.overall >= 70 %}ovr-good{% else %}ovr-avg{% endif %}">{{ player.overall }}</span>

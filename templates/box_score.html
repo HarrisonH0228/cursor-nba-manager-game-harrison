@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% macro box_score_table(team_name_val, lines, highlight) %}
+{% macro box_score_table(team_name_val, lines, highlight, dnp_lines=[]) %}
 <div class="card-nba h-100">
   <div class="card-nba-header" style="gap:.75rem;">
     <img class="team-logo-sm" data-team-logo="{{ team_name_val }}" alt="" onerror="this.style.display='none'">
@@ -27,6 +27,12 @@
           <td>{{ line.ast }}</td>
           <td style="color:var(--text-muted);">{{ line.stl }}</td>
           <td style="color:var(--text-muted);">{{ line.blk }}</td>
+        </tr>
+        {% endfor %}
+        {% for dnp in dnp_lines %}
+        <tr style="opacity:.75;">
+          <td style="font-weight:500;color:var(--text-muted);">{{ dnp.name }}</td>
+          <td colspan="6"><span class="badge-nba badge-nba-red">DNP — {{ dnp.reason|title }}</span></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -72,10 +78,10 @@
 <!-- Box scores -->
 <div class="row g-4">
   <div class="col-lg-6">
-    {{ box_score_table(home_name, game.home_box, game.home_id == user_team_id) }}
+    {{ box_score_table(home_name, game.home_box, game.home_id == user_team_id, game.home_dnp or []) }}
   </div>
   <div class="col-lg-6">
-    {{ box_score_table(away_name, game.away_box, game.away_id == user_team_id) }}
+    {{ box_score_table(away_name, game.away_box, game.away_id == user_team_id, game.away_dnp or []) }}
   </div>
 </div>
 {% endblock %}

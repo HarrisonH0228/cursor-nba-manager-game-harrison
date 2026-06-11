@@ -216,6 +216,8 @@ def init_season(players, season_year=2026, rng=None):
         "schedule": schedule,
         "playoffs": None,
         "recent_results": [],
+        "injury_log": [],
+        "pending_notifications": [],
     }
     _cap_team_rosters(season)
     from roster import _sync_free_agents
@@ -632,8 +634,37 @@ def _record_result(season, game, result):
 
 
 def _play_game(season, game, lookup, rng):
+    from injuries import injured_player_ids, roll_game_injuries, tick_injuries_after_game
+
     home_roster = roster_players(season, game["home_id"], lookup)
     away_roster = roster_players(season, game["away_id"], lookup)
+    day = game.get("day", season.get("current_day", 1))
+
+    roll_game_injuries(season, game["home_id"], home_roster, day, rng)
+    roll_game_injuries(season, game["away_id"], away_roster, day, rng)
+
+    home_injured = injured_player_ids(home_roster)
+    away_injured = injured_player_ids(away_roster)
+
+    game["home_dnp"] = [
+        {
+            "player_id": player["id"],
+            "name": player.get("name", str(player["id"])),
+            "reason": (player.get("injury") or {}).get("type", "injury"),
+        }
+        for player in home_roster
+        if player["id"] in home_injured
+    ]
+    game["away_dnp"] = [
+        {
+            "player_id": player["id"],
+            "name": player.get("name", str(player["id"])),
+            "reason": (player.get("injury") or {}).get("type", "injury"),
+        }
+        for player in away_roster
+        if player["id"] in away_injured
+    ]
+
     home_gp = season["standings"][str(game["home_id"])].get("gp", 0)
     away_gp = season["standings"][str(game["away_id"])].get("gp", 0)
     result = simulate_game_with_box_score(
@@ -642,8 +673,13 @@ def _play_game(season, game, lookup, rng):
         rng,
         home_team_gp=home_gp,
         away_team_gp=away_gp,
+        home_exclude_ids=home_injured,
+        away_exclude_ids=away_injured,
     )
     _record_result(season, game, result)
+
+    tick_injuries_after_game(home_roster)
+    tick_injuries_after_game(away_roster)
     return game
 
 

@@ -1,4 +1,5 @@
 MIN_GAMES_FOR_RATINGS = 20
+LEAGUE_OVR_SCALE = 0.92
 STAT_WEIGHTS = {"ppg": 3.0, "rpg": 1.5, "apg": 1.5, "spg": 1.0, "bpg": 1.0}
 STAT_COLUMNS = ("ppg", "rpg", "apg", "spg", "bpg")
 DERIVED_STATS = ("overall",)
@@ -86,7 +87,11 @@ def compute_overall_ratings(players):
             weight_total += weight
 
         if weight_total > 0:
-            overall_by_id[player["id"]] = round(weighted_sum / weight_total, 1)
+            raw = weighted_sum / weight_total
+            overall_by_id[player["id"]] = round(
+                max(MIN_INTRINSIC_OVERALL, min(MAX_INTRINSIC_OVERALL, raw * LEAGUE_OVR_SCALE)),
+                1,
+            )
 
     return overall_by_id
 
@@ -234,6 +239,21 @@ def compute_team_overall(team_players, team_gp=None):
     if weight_total <= 0:
         return None
     return round(weighted_sum / weight_total, 1)
+
+
+def compute_team_defense_rating(team_players, team_gp=None):
+    """Rotation-weighted average defense attribute (higher = better defense)."""
+    from attributes import get_attributes
+
+    team_gp = _resolve_team_gp(team_players, team_gp)
+    pool = team_rating_pool(team_players, team_gp)
+    if not pool:
+        pool = sorted(team_players, key=lambda player: player.get("overall") or 0, reverse=True)
+    rotation = pool[:TOP_PLAYERS_FOR_TEAM_OVERALL]
+    if not rotation:
+        return 50.0
+    total = sum(get_attributes(player).get("defense", 50) for player in rotation)
+    return round(total / len(rotation), 1)
 
 
 def build_team_summaries(players):

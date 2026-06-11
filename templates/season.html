@@ -181,18 +181,20 @@
     </thead>
     <tbody>
       {% for game in schedule %}
-      <tr>
+      <tr class="{% if user_team_id and (game.home_id == user_team_id or game.away_id == user_team_id) %}user-row{% endif %}">
         <td style="color:var(--text-muted);">{{ game.day }}</td>
         <td>
           <div style="display:flex;align-items:center;gap:.5rem;">
             <img class="team-logo-sm" data-team-logo="{{ game.home_name }}" alt="" onerror="this.style.display='none'">
-            {{ game.home_name }}
+            <span style="font-weight:{% if user_team_id and game.home_id == user_team_id %}700{% else %}400{% endif %};">{{ game.home_name }}</span>
+            {% if user_team_id and game.home_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
           </div>
         </td>
         <td>
           <div style="display:flex;align-items:center;gap:.5rem;">
             <img class="team-logo-sm" data-team-logo="{{ game.away_name }}" alt="" onerror="this.style.display='none'">
-            {{ game.away_name }}
+            <span style="font-weight:{% if user_team_id and game.away_id == user_team_id %}700{% else %}400{% endif %};">{{ game.away_name }}</span>
+            {% if user_team_id and game.away_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
           </div>
         </td>
         <td>
@@ -234,11 +236,30 @@
   </form>
 </div>
 
+{% if season.injury_log %}
+<div class="card-nba mb-4">
+  <div class="card-nba-header">
+    <h2>Injury Report</h2>
+    <span class="badge-nba badge-nba-red">Medical</span>
+  </div>
+  {% for injury in season.injury_log[-5:]|reverse %}
+  <div class="series-item">
+    <span style="color:var(--text-muted);font-size:.8rem;min-width:3.5rem;">Day {{ injury.day }}</span>
+    <span style="flex:1;font-weight:{% if user_team_id and injury.team_id == user_team_id %}600{% else %}400{% endif %};">
+      {{ injury.player_name }}
+      <span style="color:var(--text-muted);">({{ injury.type }})</span>
+      — out {{ injury.games_out }} game{% if injury.games_out != 1 %}s{% endif %}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if season.recent_results %}
 <div class="card-nba mb-4">
   <div class="card-nba-header"><h2>Recent Results</h2></div>
   {% for result in season.recent_results[:8] %}
-  <div class="series-item">
+  <div class="series-item" style="{% if user_team_id and (result.home_id == user_team_id or result.away_id == user_team_id) %}border-left:3px solid rgba(59,130,246,.5);padding-left:.75rem;{% endif %}">
     <span style="color:var(--text-muted);font-size:.8rem;min-width:3.5rem;">Day {{ result.day }}</span>
     <span style="flex:1;">
       {% if result.game_id %}

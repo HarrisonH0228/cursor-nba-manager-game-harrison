@@ -140,6 +140,50 @@ class AttributeTests(unittest.TestCase):
         self.assertIn("positions", profile)
         self.assertGreaterEqual(len(profile["positions"]), 1)
 
+    def test_elite_roster_scores_higher_than_weak_roster(self):
+        rng = random.Random(42)
+        sorted_players = sorted(
+            self.players,
+            key=lambda player: player.get("ppg") or 0,
+            reverse=True,
+        )
+        elite_roster = sorted_players[:8]
+        weak_roster = sorted_players[-8:]
+
+        elite_scores = []
+        weak_scores = []
+        for _ in range(50):
+            result = simulate_game_with_box_score(elite_roster, weak_roster, rng=rng)
+            elite_scores.append(result["home_score"])
+            weak_scores.append(result["away_score"])
+
+        self.assertGreater(sum(elite_scores) / len(elite_scores), sum(weak_scores) / len(weak_scores) + 5)
+
+    def test_team_scores_vary_with_roster_strength(self):
+        rng = random.Random(43)
+        sorted_players = sorted(
+            self.players,
+            key=lambda player: player.get("ppg") or 0,
+            reverse=True,
+        )
+        elite_roster = sorted_players[:8]
+        weak_roster = sorted_players[-8:]
+        dummy_opponent = sorted_players[8:16]
+
+        elite_totals = []
+        weak_totals = []
+        for _ in range(40):
+            elite_result = simulate_game_with_box_score(elite_roster, dummy_opponent, rng=rng)
+            weak_result = simulate_game_with_box_score(weak_roster, dummy_opponent, rng=rng)
+            elite_totals.append(elite_result["home_score"])
+            weak_totals.append(weak_result["home_score"])
+
+        elite_spread = max(elite_totals) - min(elite_totals)
+        weak_spread = max(weak_totals) - min(weak_totals)
+        self.assertGreater(sum(elite_totals) / len(elite_totals), sum(weak_totals) / len(weak_totals))
+        self.assertGreater(elite_spread, 5)
+        self.assertGreater(weak_spread, 5)
+
 
 if __name__ == "__main__":
     unittest.main()

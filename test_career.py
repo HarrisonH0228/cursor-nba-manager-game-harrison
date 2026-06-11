@@ -167,6 +167,80 @@ class CareerTests(unittest.TestCase):
         refresh_player_from_attributes(player_b)
         self.assertNotEqual(player_a["ppg"], player_b["ppg"])
 
+    def test_bust_arc_has_lower_ceiling_than_starter(self):
+        from attributes import generate_rookie_profile, init_rookie_career_profile
+
+        bust = dict(self.players[0])
+        starter = dict(self.players[1])
+        for player, player_id in ((bust, 8800100), (starter, 8800101)):
+            player["id"] = player_id
+            player["age"] = 20
+            player["is_rookie"] = True
+            player["scout_grade"] = 62
+            player.pop("potential", None)
+            player.pop("peak_attributes", None)
+            player.pop("base_attributes", None)
+            player.pop("stat_modifiers", None)
+            player.pop("ceiling_factor", None)
+
+        bust["career_arc"] = "bust"
+        starter["career_arc"] = "starter"
+        profile = generate_rookie_profile(62, random.Random(31))
+        init_rookie_career_profile(bust, profile["attributes"], random.Random(31), scout_grade=62)
+        init_rookie_career_profile(starter, profile["attributes"], random.Random(32), scout_grade=62)
+
+        self.assertLess(bust.get("potential") or 0, starter.get("potential") or 0)
+        self.assertLess(bust.get("ceiling_factor") or 1.0, starter.get("ceiling_factor") or 1.0)
+        bust_peak = max(bust.get("peak_attributes", {}).values())
+        starter_peak = max(starter.get("peak_attributes", {}).values())
+        self.assertLess(bust_peak, starter_peak)
+
+    def test_peak_ppg_spread_for_similar_scout_grades(self):
+        from attributes import generate_rookie_profile, init_rookie_career_profile
+
+        ppgs = []
+        for index in range(8):
+            player = dict(self.players[0])
+            player["id"] = 8800200 + index
+            player["age"] = 20
+            player["is_rookie"] = True
+            player["scout_grade"] = 60
+            player["career_arc"] = "starter"
+            player.pop("potential", None)
+            player.pop("peak_attributes", None)
+            player.pop("base_attributes", None)
+            player.pop("stat_modifiers", None)
+            profile = generate_rookie_profile(60, random.Random(50 + index))
+            init_rookie_career_profile(
+                player, profile["attributes"], random.Random(50 + index), scout_grade=60
+            )
+            season = {"players": {str(player["id"]): player}, "rosters": {}}
+            for year in range(6):
+                apply_season_aging(season, rng=random.Random(60 + index * 10 + year))
+            ppgs.append(player.get("ppg") or 0)
+
+        self.assertGreater(max(ppgs) - min(ppgs), 4.0)
+
+    def test_season_form_changes_ppg(self):
+        player = dict(self.players[3])
+        init_career_profile(player, random.Random(70))
+        player["season_form"] = 1.0
+        refresh_player_from_attributes(player)
+        baseline_ppg = player["ppg"]
+
+        player["season_form"] = 0.85
+        refresh_player_from_attributes(player)
+        off_year_ppg = player["ppg"]
+
+        player["season_form"] = 1.12
+        refresh_player_from_attributes(player)
+        breakout_ppg = player["ppg"]
+
+        self.assertLess(off_year_ppg, baseline_ppg)
+        self.assertGreaterEqual(breakout_ppg, baseline_ppg)
+        if baseline_ppg < 23:
+            self.assertGreater(breakout_ppg, baseline_ppg)
+
 
 if __name__ == "__main__":
     unittest.main()

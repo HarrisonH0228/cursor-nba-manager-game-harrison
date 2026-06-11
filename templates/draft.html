@@ -39,16 +39,20 @@
 {% elif board.current_pick %}
 
 <!-- On the clock -->
-<div class="glass-liquid p-4 mb-4" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;">
+<div class="glass-liquid p-4 mb-4 {% if board.current_pick.owner_team_id == user_team_id %}user-pick-clock{% endif %}" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;{% if board.current_pick.owner_team_id == user_team_id %}border:1px solid rgba(59,130,246,.45);{% endif %}">
   <div>
     <div class="section-title">On the Clock</div>
     <div style="font-size:1.75rem;font-weight:900;letter-spacing:-.02em;margin-bottom:.25rem;">
       Pick #{{ board.current_pick.pick_number }}
+      {% if board.current_pick.owner_team_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOUR PICK</span>{% endif %}
     </div>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
       <span class="badge-nba badge-nba-gray">Round {{ board.current_pick.round }}</span>
       <img class="team-logo-sm" data-team-logo="{{ board.current_pick.team_name }}" alt="" onerror="this.style.display='none'">
-      <span style="font-weight:600;">{{ board.current_pick.team_name }}</span>
+      <span style="font-weight:600;">{{ board.current_pick.team_name }} slot</span>
+      {% if board.current_pick.owner_team_id != board.current_pick.team_id %}
+      <span style="color:var(--text-muted);font-size:.8rem;">→ {{ board.owner_team_name }}</span>
+      {% endif %}
     </div>
   </div>
   <div style="text-align:right;">
@@ -97,7 +101,14 @@
         </div>
         {% endfor %}
       </div>
-      <button type="submit" class="btn-nba-primary btn-nba-lg">Make Pick</button>
+      <div style="display:flex;flex-wrap:wrap;gap:.75rem;">
+        <button type="submit" class="btn-nba-primary btn-nba-lg">Make Pick</button>
+        <button type="submit" formaction="{{ url_for('season_draft_skip') }}" formmethod="post"
+                class="btn-nba-secondary btn-nba-lg"
+                onclick="return confirm('Skip this pick? The pick will be used but no player will be drafted.');">
+          Skip Pick
+        </button>
+      </div>
     </form>
   </div>
 </div>
@@ -202,7 +213,7 @@
             </div>
           </td>
           <td style="font-weight:600;">{{ pick.player_name }}</td>
-          <td><span data-ovr="{{ pick.overall }}">{{ pick.overall }}</span></td>
+          <td>{% if pick.overall is not none %}<span data-ovr="{{ pick.overall }}">{{ pick.overall }}</span>{% else %}—{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>

@@ -7,7 +7,15 @@ import unittest
 
 import season_store
 from attributes import apply_attributes
-from draft import generate_prospect, make_pick, sim_rest_of_draft, start_draft
+from draft import (
+    draft_board_context,
+    generate_prospect,
+    make_pick,
+    resolve_pick_owner,
+    sim_rest_of_draft,
+    skip_pick,
+    start_draft,
+)
 from game import clear_game, set_season_id
 from ratings import apply_ratings
 import cache
@@ -17,6 +25,7 @@ from season import (
     init_season,
     league_lookup,
     regular_season_complete,
+    roster_players,
     seed_playoffs,
     sim_rest_of_season,
     sim_to_trade_deadline,
@@ -202,6 +211,15 @@ class OffseasonTests(unittest.TestCase):
 
     def test_draft_talent_curve(self):
         team_count = len(self.season["rosters"])
+        early_ovrs = []
+        late_ovrs = []
+        for slot in (1, 3, 5):
+            prospect = generate_prospect(self.season, 1, slot, team_count, self.rng)
+            early_ovrs.append(prospect["overall"])
+        for slot in (25, 28, 30):
+            prospect = generate_prospect(self.season, 1, slot, team_count, self.rng)
+            late_ovrs.append(prospect["overall"])
+
         round_avgs = {}
         for round_num in (1, 2, 3):
             ovrs = []
@@ -210,8 +228,41 @@ class OffseasonTests(unittest.TestCase):
                 ovrs.append(prospect["overall"])
             round_avgs[round_num] = sum(ovrs) / len(ovrs)
 
-        self.assertGreater(round_avgs[1], round_avgs[2] + 10)
-        self.assertGreater(round_avgs[2], round_avgs[3] + 5)
+        self.assertGreater(sum(early_ovrs) / len(early_ovrs), sum(late_ovrs) / len(late_ovrs) + 3)
+        self.assertGreater(round_avgs[1], round_avgs[2] + 8)
+        self.assertGreater(round_avgs[2], round_avgs[3] + 8)
+
+    def test_generational_talent_is_rare(self):
+        team_count = len(self.season["rosters"])
+        generational_count = 0
+        trials = 500
+        for trial in range(trials):
+            prospect = generate_prospect(
+                self.season, 1, 1, team_count, rng=random.Random(trial)
+            )
+            if prospect.get("career_arc") == "generational":
+                generational_count += 1
+        self.assertLess(generational_count / trials, 0.05)
+
+    def test_shared_pool_early_picks_better_than_late(self):
+        from draft import generate_draft_class, generate_prospect_options, start_draft
+
+        lookup = league_lookup(self.season)
+        start_draft(self.season, lookup, rng=random.Random(99))
+        state = self.season["draft_state"]
+        team_count = state["team_count"]
+
+        early_options = generate_prospect_options(self.season, 1, team_count, self.rng)
+        late_options = generate_prospect_options(self.season, 20, team_count, self.rng)
+        early_avg = sum(p["overall"] for p in early_options) / len(early_options)
+        late_avg = sum(p["overall"] for p in late_options) / len(late_options)
+        self.assertGreater(early_avg, late_avg)
+
+        pool = generate_draft_class(self.season, team_count, random.Random(100))
+        top_rank = pool[0]["draft_rank"]
+        bottom_rank = pool[-1]["draft_rank"]
+        self.assertLess(top_rank, bottom_rank)
+        self.assertGreater(pool[0]["overall"], pool[-1]["overall"])
 
     def test_lottery_favors_worst_teams(self):
         lookup = league_lookup(self.season)
@@ -323,6 +374,101 @@ class OffseasonTests(unittest.TestCase):
         )
         self.assertFalse(valid)
         self.assertIn("roster limit", message.lower())
+
+    def test_traded_pick_changes_draft_owner(self):
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+
+        user_r1 = next(
+            pick for pick in self.season["draft_picks"][str(user_team)] if pick["round"] == 1
+        )
+        partner_r1 = next(
+            pick for pick in self.season["draft_picks"][str(partner_team)] if pick["round"] == 1
+        )
+        execute_trade(
+            self.season,
+            user_team,
+            partner_team,
+            [],
+            [user_r1["id"]],
+            [],
+            [partner_r1["id"]],
+        )
+
+        self.season["phase"] = "complete"
+        start_draft(self.season, lookup, rng=self.rng)
+        queue = self.season["draft_state"]["queue"]
+        user_slot_r1 = next(
+            slot for slot in queue if slot["team_id"] == user_team and slot["round"] == 1
+        )
+        self.assertEqual(user_slot_r1["owner_team_id"], partner_team)
+        self.assertEqual(resolve_pick_owner(self.season, user_team, 1), partner_team)
+
+    def test_traded_away_pick_not_user_turn(self):
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+
+        user_r2 = next(
+            pick for pick in self.season["draft_picks"][str(user_team)] if pick["round"] == 2
+        )
+        partner_r2 = next(
+            pick for pick in self.season["draft_picks"][str(partner_team)] if pick["round"] == 2
+        )
+        execute_trade(
+            self.season,
+            user_team,
+            partner_team,
+            [],
+            [user_r2["id"]],
+            [],
+            [partner_r2["id"]],
+        )
+
+        self.season["phase"] = "complete"
+        start_draft(self.season, lookup, rng=self.rng)
+        queue = self.season["draft_state"]["queue"]
+        user_r2_slot = next(
+            slot for slot in queue if slot["team_id"] == user_team and slot["round"] == 2
+        )
+        self.season["draft_state"]["current_index"] = queue.index(user_r2_slot)
+        board = draft_board_context(self.season, user_team, lookup)
+        self.assertFalse(board["is_user_turn"])
+
+    def test_skip_pick_consumes_asset_without_player(self):
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        self.season["phase"] = "complete"
+        start_draft(self.season, lookup, rng=self.rng)
+        queue = self.season["draft_state"]["queue"]
+        first_owner_slot = next(
+            slot for slot in queue if slot["owner_team_id"] == user_team
+        )
+        self.season["draft_state"]["current_index"] = queue.index(first_owner_slot)
+        roster_before = list(self.season["rosters"][str(user_team)])
+        picks_before = len(self.season["draft_picks"][str(user_team)])
+
+        ok, message = skip_pick(self.season, user_team)
+        self.assertTrue(ok)
+        self.assertIn("Skipped", message)
+        self.assertEqual(len(self.season["draft_picks"][str(user_team)]), picks_before - 1)
+        self.assertEqual(self.season["rosters"][str(user_team)], roster_before)
+
+    def test_release_removes_player_from_roster_everywhere(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        lookup = league_lookup(self.season)
+        player_id = self.season["rosters"][str(user_team)][0]
+
+        ok, _ = release_player(self.season, user_team, player_id)
+        self.assertTrue(ok)
+        self.assertNotIn(player_id, self.season["rosters"][str(user_team)])
+        self.assertIsNone(self.season["players"][str(player_id)]["team_id"])
+        self.assertEqual(self.season["players"][str(player_id)]["team"], "Free Agent")
+
+        roster = roster_players(self.season, user_team, lookup)
+        roster_ids = [player["id"] for player in roster]
+        self.assertNotIn(player_id, roster_ids)
 
     def test_release_and_sign_free_agent(self):
         user_team = int(next(iter(self.season["rosters"])))
