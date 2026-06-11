@@ -1,78 +1,165 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{{ page_title }}{% endblock %} | NBA Manager</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{{ page_title }}{% endblock %} | NBA Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nba.css') }}">
 </head>
 <body class="d-flex flex-column min-vh-100">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="{{ url_for('index') }}">NBA Manager</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto align-items-lg-center">
-                    {% if game %}
-                    <li class="nav-item">
-                        <span class="navbar-text text-light me-lg-3">{{ game.team_name }}</span>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('index') }}">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('team') }}">My Team</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('trade') }}">Trade</a>
-                    </li>
-                    {% if active_season %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('free_agency') }}">Free Agency</a>
-                    </li>
-                    {% endif %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('search') }}">Search</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('season_hub') }}">Season</a>
-                    </li>
-                    {% if active_season and active_season.phase in ['complete', 'draft', 'offseason'] %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('season_draft') }}">Draft</a>
-                    </li>
-                    {% endif %}
-                    <li class="nav-item ms-lg-2">
-                        <form method="post" action="{{ url_for('new_game') }}" class="d-inline"
-                              onsubmit="return confirm('Start a new game? Your current team assignment will be lost.');">
-                            <button type="submit" class="btn btn-outline-light btn-sm">New Game</button>
-                        </form>
-                    </li>
-                    {% endif %}
-                </ul>
-            </div>
-        </div>
-    </nav>
 
-    <main class="container flex-grow-1 py-4">
-        {% with messages = get_flashed_messages() %}
-        {% if messages %}
-        {% for message in messages %}
-        <div class="alert alert-success">{{ message }}</div>
-        {% endfor %}
+<!-- ambient blue orb -->
+<div class="bg-orb-blue"></div>
+
+<!-- ── Navbar ── -->
+<nav class="nba-navbar">
+  <div class="container">
+    <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+
+      <!-- Brand -->
+      <a class="navbar-brand-nba" href="{{ url_for('index') }}">
+        <!-- NBA silhouette logo (inline SVG) -->
+        <svg class="nba-logo-mark" viewBox="0 0 60 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="60" height="80" rx="6" fill="#C8102E"/>
+          <!-- simplified player silhouette -->
+          <ellipse cx="30" cy="14" rx="7" ry="7" fill="white"/>
+          <path d="M18 28 Q20 22 30 22 Q40 22 42 28 L45 48 L38 48 L36 38 L36 70 L24 70 L24 38 L22 48 L15 48 Z" fill="white"/>
+          <path d="M22 48 L15 60 L20 62 L26 52 Z" fill="white"/>
+          <path d="M38 48 L45 60 L40 62 L34 52 Z" fill="white"/>
+        </svg>
+        <span><span class="brand-text-nba">NBA</span> <span class="brand-text-mgr">Manager</span></span>
+      </a>
+
+      <!-- Nav links -->
+      {% if game %}
+      <div class="d-flex align-items-center flex-wrap gap-1">
+        <!-- Team badge -->
+        <div class="navbar-team-badge me-2">
+          <img class="navbar-team-logo" src="" alt="" id="nav-team-logo" onerror="this.style.display='none'">
+          <span id="nav-team-name">{{ game.team_name }}</span>
+        </div>
+
+        <a class="nav-link-nba" href="{{ url_for('index') }}">Dashboard</a>
+        <a class="nav-link-nba" href="{{ url_for('team') }}">My Team</a>
+        <a class="nav-link-nba" href="{{ url_for('trade') }}">Trade</a>
+        {% if active_season %}
+        <a class="nav-link-nba" href="{{ url_for('free_agency') }}">Free Agency</a>
         {% endif %}
-        {% endwith %}
-        {% block content %}{% endblock %}
-    </main>
+        <a class="nav-link-nba" href="{{ url_for('search') }}">Search</a>
+        <a class="nav-link-nba" href="{{ url_for('season_hub') }}">Season</a>
+        {% if active_season and active_season.phase in ['complete', 'draft', 'offseason'] %}
+        <a class="nav-link-nba" href="{{ url_for('season_draft') }}">Draft</a>
+        {% endif %}
 
-    <footer class="bg-light py-3 mt-auto">
-        <div class="container text-center text-muted">
-            NBA Manager &copy; 2026
-        </div>
-    </footer>
+        <form method="post" action="{{ url_for('new_game') }}" class="d-inline ms-1"
+              onsubmit="return confirm('Start a new game? Your current team assignment will be lost.');">
+          <button type="submit" class="btn-nba-ghost">New Game</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</nav>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- ── Main ── -->
+<main class="container flex-grow-1 py-4">
+  {% with messages = get_flashed_messages() %}
+  {% if messages %}
+  <div class="mb-4" style="display:flex;flex-direction:column;gap:.5rem;">
+    {% for message in messages %}
+    <div class="alert-nba alert-nba-success">{{ message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</main>
+
+<!-- ── Footer ── -->
+<footer class="footer-nba">
+  <div class="container">
+    NBA Manager &copy; 2026 &nbsp;·&nbsp; All NBA team names, logos and marks are property of the NBA.
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+
+<script>
+/* ── Team name → NBA CDN logo ── */
+const NBA_TEAM_IDS = {
+  "Atlanta Hawks":          1610612737,
+  "Boston Celtics":         1610612738,
+  "Brooklyn Nets":          1610612751,
+  "Charlotte Hornets":      1610612766,
+  "Chicago Bulls":          1610612741,
+  "Cleveland Cavaliers":    1610612739,
+  "Dallas Mavericks":       1610612742,
+  "Denver Nuggets":         1610612743,
+  "Detroit Pistons":        1610612765,
+  "Golden State Warriors":  1610612744,
+  "Houston Rockets":        1610612745,
+  "Indiana Pacers":         1610612754,
+  "LA Clippers":            1610612746,
+  "Los Angeles Clippers":   1610612746,
+  "Los Angeles Lakers":     1610612747,
+  "Memphis Grizzlies":      1610612763,
+  "Miami Heat":             1610612748,
+  "Milwaukee Bucks":        1610612749,
+  "Minnesota Timberwolves": 1610612750,
+  "New Orleans Pelicans":   1610612740,
+  "New York Knicks":        1610612752,
+  "Oklahoma City Thunder":  1610612760,
+  "Orlando Magic":          1610612753,
+  "Philadelphia 76ers":     1610612755,
+  "Phoenix Suns":           1610612756,
+  "Portland Trail Blazers": 1610612757,
+  "Sacramento Kings":       1610612758,
+  "San Antonio Spurs":      1610612759,
+  "Toronto Raptors":        1610612761,
+  "Utah Jazz":              1610612762,
+  "Washington Wizards":     1610612764,
+};
+
+function teamLogoUrl(teamName) {
+  const id = NBA_TEAM_IDS[teamName];
+  if (!id) return null;
+  return `https://cdn.nba.com/logos/nba/${id}/primary/L/logo.svg`;
+}
+
+/* Wire navbar team logo */
+(function() {
+  const el = document.getElementById('nav-team-logo');
+  if (!el) return;
+  const name = document.getElementById('nav-team-name')?.textContent?.trim();
+  const url = teamLogoUrl(name);
+  if (url) el.src = url;
+})();
+
+/* Auto-apply to any [data-team-logo] img */
+document.querySelectorAll('[data-team-logo]').forEach(img => {
+  const name = img.dataset.teamLogo;
+  const url = teamLogoUrl(name);
+  if (url) img.src = url;
+});
+
+/* OVR color chip helper */
+function ovrClass(val) {
+  if (!val) return 'ovr-avg';
+  if (val >= 85) return 'ovr-elite';
+  if (val >= 78) return 'ovr-great';
+  if (val >= 70) return 'ovr-good';
+  return 'ovr-avg';
+}
+document.querySelectorAll('[data-ovr]').forEach(el => {
+  const v = parseInt(el.dataset.ovr, 10);
+  el.classList.add('ovr-chip', ovrClass(v));
+});
+</script>
+
+{% block scripts %}{% endblock %}
 </body>
 </html>

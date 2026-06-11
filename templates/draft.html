@@ -1,184 +1,227 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div>
-        <h1 class="mb-1">Draft</h1>
-        <p class="text-muted mb-0">
-            {{ season.season_year }} season
-            · Phase: {{ season.phase|replace('_', ' ')|title }}
-        </p>
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+  <div>
+    <p class="section-title">NBA Draft</p>
+    <h1>Draft Board</h1>
+    {% if season %}
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
+      <span class="badge-nba badge-nba-gray">{{ season.season_year }}</span>
+      <span class="badge-nba badge-nba-blue">{{ season.phase|replace('_',' ')|title }}</span>
     </div>
-    <div class="d-flex flex-wrap gap-2">
-        <a href="{{ url_for('season_hub') }}" class="btn btn-outline-secondary">Season Hub</a>
-        <a href="{{ url_for('trade') }}" class="btn btn-outline-secondary">Trade</a>
-    </div>
+    {% endif %}
+  </div>
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+    <a href="{{ url_for('season_hub') }}" class="btn-nba-secondary">Season Hub</a>
+    <a href="{{ url_for('trade') }}" class="btn-nba-secondary">Trade</a>
+  </div>
 </div>
 
 {% if phase == 'complete' %}
-<div class="alert alert-info mb-4">
-    Playoffs complete. The top 14 picks are determined by lottery (worst teams have the best odds).
-    Picks 15–30 follow playoff finish order.
+<div class="alert-nba alert-nba-info mb-4">
+  Playoffs complete. The top 14 picks are determined by lottery. Picks 15–30 follow playoff finish order.
 </div>
 <form method="post" action="{{ url_for('season_draft_start') }}">
-    <button type="submit" class="btn btn-primary btn-lg">Start Draft</button>
+  <button type="submit" class="btn-nba-primary btn-nba-lg">Start Draft</button>
 </form>
 
 {% elif phase == 'offseason' %}
-<div class="alert alert-success mb-4">
-    Draft complete. Advance to the next season when you're ready.
-</div>
+<div class="alert-nba alert-nba-success mb-4">Draft complete. Review results or advance to the next season.</div>
 <form method="post" action="{{ url_for('season_advance') }}">
-    <button type="submit" class="btn btn-success btn-lg">Advance to Next Season</button>
+  <button type="submit" class="btn-nba-success btn-nba-lg">Advance to Next Season</button>
 </form>
 
 {% elif board %}
+
 {% if board.draft_complete %}
-<div class="alert alert-success mb-4">Draft complete.</div>
+<div class="alert-nba alert-nba-success mb-4">Draft complete!</div>
 {% elif board.current_pick %}
-<div class="card mb-4">
-    <div class="card-body">
-        <h2 class="h5 mb-2">On the clock</h2>
-        <p class="mb-1">
-            Pick #{{ board.current_pick.pick_number }}
-            · Round {{ board.current_pick.round }}
-            · {{ board.current_pick.team_name }}
-        </p>
-        <p class="text-muted mb-0">
-            {{ board.picks_made }} / {{ board.total_picks }} picks made
-        </p>
+
+<!-- On the clock -->
+<div class="glass-liquid p-4 mb-4" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;">
+  <div>
+    <div class="section-title">On the Clock</div>
+    <div style="font-size:1.75rem;font-weight:900;letter-spacing:-.02em;margin-bottom:.25rem;">
+      Pick #{{ board.current_pick.pick_number }}
     </div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+      <span class="badge-nba badge-nba-gray">Round {{ board.current_pick.round }}</span>
+      <img class="team-logo-sm" data-team-logo="{{ board.current_pick.team_name }}" alt="" onerror="this.style.display='none'">
+      <span style="font-weight:600;">{{ board.current_pick.team_name }}</span>
+    </div>
+  </div>
+  <div style="text-align:right;">
+    <div style="font-size:.8rem;color:var(--text-muted);">Picks made</div>
+    <div style="font-size:1.5rem;font-weight:800;">{{ board.picks_made }} <span style="color:var(--text-muted);font-size:1rem;">/ {{ board.total_picks }}</span></div>
+    <div class="progress-nba mt-1" style="width:120px;margin-left:auto;">
+      <div class="progress-nba-bar" style="width:{{ ((board.picks_made / board.total_picks) * 100)|int }}%;"></div>
+    </div>
+  </div>
 </div>
 
 {% if board.is_user_turn %}
-<div class="card mb-4">
-    <div class="card-header">
-        <h2 class="h6 mb-0">Your pick — choose a prospect</h2>
-    </div>
-    <div class="card-body">
-        <form method="post" action="{{ url_for('season_draft_pick') }}">
-            <div class="row g-3 mb-3">
-                {% for prospect in board.prospect_options %}
-                <div class="col-md-6">
-                    <label class="card h-100 border {% if loop.first %}border-primary{% endif %}">
-                        <div class="card-body">
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="prospect_index"
-                                       value="{{ loop.index0 }}" id="prospect-{{ loop.index0 }}"
-                                       {% if loop.first %}checked{% endif %}>
-                                <span class="form-check-label fw-semibold" for="prospect-{{ loop.index0 }}">
-                                    {{ prospect.name }}
-                                </span>
-                            </div>
-                            <p class="small text-muted mb-0 mt-2">
-                                OVR {{ prospect.overall }}
-                                · Age {{ prospect.age }}
-                                · {{ positions_label(prospect.positions) }}
-                                · {{ prospect.ppg }} PPG / {{ prospect.rpg }} RPG / {{ prospect.apg }} APG
-                                · {{ prospect.upside_tier }}
-                            </p>
-                        </div>
-                    </label>
+<!-- User pick -->
+<div class="card-nba mb-4">
+  <div class="card-nba-header">
+    <h2>Your Pick — Choose a Prospect</h2>
+    <span class="badge-nba badge-nba-red">Your Turn</span>
+  </div>
+  <div class="card-nba-body">
+    <form method="post" action="{{ url_for('season_draft_pick') }}">
+      <div class="row g-3 mb-4">
+        {% for prospect in board.prospect_options %}
+        <div class="col-md-6">
+          <label class="prospect-card {% if loop.first %}selected{% endif %}" for="prospect-{{ loop.index0 }}">
+            <div style="display:flex;align-items:flex-start;gap:.75rem;margin-bottom:.5rem;">
+              <input class="form-check-input" type="radio" name="prospect_index"
+                     value="{{ loop.index0 }}" id="prospect-{{ loop.index0 }}"
+                     {% if loop.first %}checked{% endif %}
+                     onchange="document.querySelectorAll('.prospect-card').forEach(c=>c.classList.remove('selected'));this.closest('.prospect-card').classList.add('selected')">
+              <div>
+                <div style="font-weight:700;font-size:1rem;">{{ prospect.name }}</div>
+                <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.35rem;">
+                  <span data-ovr="{{ prospect.overall }}">{{ prospect.overall }}</span>
+                  <span class="badge-nba badge-nba-gray">Age {{ prospect.age }}</span>
+                  <span class="badge-nba badge-nba-gray">{{ positions_label(prospect.positions) }}</span>
                 </div>
-                {% endfor %}
+              </div>
             </div>
-            <button type="submit" class="btn btn-primary">Make Pick</button>
-        </form>
-    </div>
+            <div style="font-size:.8rem;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:.75rem;margin-top:.5rem;">
+              <span>{{ prospect.ppg }} PPG</span>
+              <span>{{ prospect.rpg }} RPG</span>
+              <span>{{ prospect.apg }} APG</span>
+              <span style="color:#fbbf24;font-weight:600;">{{ prospect.upside_tier }}</span>
+            </div>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn-nba-primary btn-nba-lg">Make Pick</button>
+    </form>
+  </div>
 </div>
 {% else %}
-<div class="d-flex flex-wrap gap-2 mb-4">
-    <form method="post" action="{{ url_for('season_draft_sim') }}">
-        <input type="hidden" name="mode" value="to_user">
-        <button type="submit" class="btn btn-primary">Sim to My Pick</button>
-    </form>
-    <form method="post" action="{{ url_for('season_draft_sim') }}">
-        <input type="hidden" name="mode" value="rest">
-        <button type="submit" class="btn btn-outline-primary">Sim Rest of Draft</button>
-    </form>
+<!-- CPU turn -->
+<div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:1.5rem;">
+  <form method="post" action="{{ url_for('season_draft_sim') }}">
+    <input type="hidden" name="mode" value="to_user">
+    <button type="submit" class="btn-nba-primary">Sim to My Pick</button>
+  </form>
+  <form method="post" action="{{ url_for('season_draft_sim') }}">
+    <input type="hidden" name="mode" value="rest">
+    <button type="submit" class="btn-nba-secondary">Sim Rest of Draft</button>
+  </form>
 </div>
 {% endif %}
 {% endif %}
 
+<!-- Lottery / Playoff order -->
 {% if board and (board.lottery_order or board.playoff_order) %}
 <div class="row g-4 mb-4">
-    {% if board.lottery_order %}
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header"><h2 class="h6 mb-0">Lottery (picks 1–14)</h2></div>
-            <div class="table-responsive">
-                <table class="table table-striped table-sm align-middle mb-0">
-                    <thead>
-                        <tr><th>Pick</th><th>Team</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for entry in board.lottery_order %}
-                        <tr class="{% if entry.team_id == user_team_id %}table-success{% endif %}">
-                            <td>#{{ entry.pick_number }}</td>
-                            <td>{{ entry.team_name }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+  {% if board.lottery_order %}
+  <div class="col-lg-6">
+    <div class="card-nba">
+      <div class="card-nba-header">
+        <h2>Lottery (Picks 1–14)</h2>
+        <span class="badge-nba badge-nba-red">Lottery</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="table-nba">
+          <thead><tr><th>Pick</th><th>Team</th></tr></thead>
+          <tbody>
+            {% for entry in board.lottery_order %}
+            <tr class="{% if entry.team_id == user_team_id %}user-row{% endif %}">
+              <td style="font-weight:600;color:var(--text-muted);">#{{ entry.pick_number }}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:.5rem;">
+                  <img class="team-logo-sm" data-team-logo="{{ entry.team_name }}" alt="" onerror="this.style.display='none'">
+                  {{ entry.team_name }}
+                  {% if entry.team_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-    {% endif %}
-    {% if board.playoff_order %}
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header"><h2 class="h6 mb-0">Playoff order (picks 15–30)</h2></div>
-            <div class="table-responsive">
-                <table class="table table-striped table-sm align-middle mb-0">
-                    <thead>
-                        <tr><th>Pick</th><th>Team</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for entry in board.playoff_order %}
-                        <tr class="{% if entry.team_id == user_team_id %}table-success{% endif %}">
-                            <td>#{{ entry.pick_number }}</td>
-                            <td>{{ entry.team_name }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+  </div>
+  {% endif %}
+  {% if board.playoff_order %}
+  <div class="col-lg-6">
+    <div class="card-nba">
+      <div class="card-nba-header">
+        <h2>Playoff Order (Picks 15–30)</h2>
+        <span class="badge-nba badge-nba-blue">Playoff</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="table-nba">
+          <thead><tr><th>Pick</th><th>Team</th></tr></thead>
+          <tbody>
+            {% for entry in board.playoff_order %}
+            <tr class="{% if entry.team_id == user_team_id %}user-row{% endif %}">
+              <td style="font-weight:600;color:var(--text-muted);">#{{ entry.pick_number }}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:.5rem;">
+                  <img class="team-logo-sm" data-team-logo="{{ entry.team_name }}" alt="" onerror="this.style.display='none'">
+                  {{ entry.team_name }}
+                  {% if entry.team_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-    {% endif %}
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 
+<!-- Recent picks -->
 {% if board.recent_picks %}
-<div class="card">
-    <div class="card-header">
-        <h2 class="h6 mb-0">Recent picks</h2>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-striped table-sm align-middle mb-0">
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Round</th>
-                    <th>Team</th>
-                    <th>Player</th>
-                    <th>OVR</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for pick in board.recent_picks %}
-                <tr class="{% if pick.team_id == user_team_id %}table-success{% endif %}">
-                    <td>{{ pick.pick_number }}</td>
-                    <td>{{ pick.round }}</td>
-                    <td>{{ pick.team_name }}</td>
-                    <td>{{ pick.player_name }}</td>
-                    <td>{{ pick.overall }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+<div class="card-nba">
+  <div class="card-nba-header"><h2>Recent Picks</h2></div>
+  <div style="overflow-x:auto;">
+    <table class="table-nba" style="min-width:480px;">
+      <thead>
+        <tr><th>#</th><th>Round</th><th>Team</th><th>Player</th><th>OVR</th></tr>
+      </thead>
+      <tbody>
+        {% for pick in board.recent_picks %}
+        <tr class="{% if pick.team_id == user_team_id %}user-row{% endif %}">
+          <td style="color:var(--text-muted);font-weight:600;">{{ pick.pick_number }}</td>
+          <td style="color:var(--text-muted);">{{ pick.round }}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:.5rem;">
+              <img class="team-logo-sm" data-team-logo="{{ pick.team_name }}" alt="" onerror="this.style.display='none'">
+              {{ pick.team_name }}
+              {% if pick.team_id == user_team_id %}<span class="badge-nba badge-nba-blue badge-you">YOU</span>{% endif %}
+            </div>
+          </td>
+          <td style="font-weight:600;">{{ pick.player_name }}</td>
+          <td><span data-ovr="{{ pick.overall }}">{{ pick.overall }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('[data-ovr]').forEach(el => {
+  const v = parseInt(el.dataset.ovr, 10);
+  el.classList.add('ovr-chip');
+  if (v >= 85) el.classList.add('ovr-elite');
+  else if (v >= 78) el.classList.add('ovr-great');
+  else if (v >= 70) el.classList.add('ovr-good');
+  else el.classList.add('ovr-avg');
+});
+</script>
 {% endblock %}

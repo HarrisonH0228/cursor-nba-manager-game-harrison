@@ -1,88 +1,120 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div>
-        <h1 class="mb-1">Your Front Office</h1>
-        <p class="lead mb-0">Welcome, GM of the <strong>{{ team_name }}</strong></p>
-        {% if last_updated %}
-        <p class="text-muted mb-0 mt-1">Last updated: {{ last_updated }}</p>
-        {% endif %}
-    </div>
+<!-- Page header with team logo -->
+<div class="page-header d-flex flex-wrap align-items-center gap-4">
+  <img class="team-logo-xl" data-team-logo="{{ team_name }}" alt="{{ team_name }}" onerror="this.style.display='none'">
+  <div>
+    <p class="section-title">General Manager Dashboard</p>
+    <h1 style="font-size:2.5rem;font-weight:900;letter-spacing:-0.04em;margin-bottom:.25rem;">{{ team_name }}</h1>
+    {% if last_updated %}
+    <p class="text-muted-nba" style="font-size:0.8rem;">Data updated {{ last_updated }}</p>
+    {% endif %}
+  </div>
 </div>
 
-<div class="row g-4 mb-4">
-    <div class="col-md-4">
-        <div class="card h-100">
-            <div class="card-body">
-                <h2 class="h5 card-title">Team Rating</h2>
-                {% if team_overall is not none %}
-                <p class="display-6 mb-1">{{ team_overall }}</p>
-                {% if team_rank %}
-                <p class="text-muted mb-0">League rank #{{ team_rank }}</p>
-                {% endif %}
-                {% else %}
-                <p class="text-muted mb-0">Not enough rated players yet.</p>
-                {% endif %}
-                <p class="small text-muted mt-2 mb-0">Top 8 qualified players (20+ GP); top 3 weighted 2.5x; under 40 GP at 1/3 weight</p>
-            </div>
-        </div>
+<!-- Stat cards row -->
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-lg-4">
+    <div class="stat-card red-accent">
+      <div class="stat-card-label">Team Overall</div>
+      {% if team_overall is not none %}
+      <div class="stat-card-value" data-ovr="{{ team_overall }}">{{ team_overall }}</div>
+      <div class="stat-card-sub">
+        {% if team_rank %}League rank <strong style="color:var(--text);">#{{ team_rank }}</strong>{% endif %}
+      </div>
+      {% else %}
+      <div class="stat-card-value" style="font-size:1.5rem;color:var(--text-muted);">—</div>
+      <div class="stat-card-sub">Not enough rated players yet</div>
+      {% endif %}
     </div>
-    <div class="col-md-4">
-        <div class="card h-100">
-            <div class="card-body">
-                <h2 class="h5 card-title">Roster</h2>
-                <p class="display-6 mb-0">{{ roster_size }}</p>
-                <p class="text-muted mb-0">players on your team</p>
-            </div>
-        </div>
+  </div>
+
+  <div class="col-sm-6 col-lg-4">
+    <div class="stat-card blue-accent">
+      <div class="stat-card-label">Roster Size</div>
+      <div class="stat-card-value">{{ roster_size }}</div>
+      <div class="stat-card-sub">players on your team</div>
     </div>
-    <div class="col-md-4">
-        <div class="card h-100">
-            <div class="card-body d-flex flex-column">
-                <h2 class="h5 card-title">Quick Actions</h2>
-                <div class="mt-auto d-grid gap-2">
-                    <a href="{{ url_for('team') }}" class="btn btn-primary">View Roster</a>
-                    <a href="{{ url_for('search') }}" class="btn btn-outline-secondary">Browse League</a>
-                </div>
-            </div>
-        </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="stat-card white-accent" style="display:flex;flex-direction:column;gap:.75rem;">
+      <div class="stat-card-label">Quick Actions</div>
+      <a href="{{ url_for('team') }}" class="btn-nba-primary" style="justify-content:center;">View Roster</a>
+      <a href="{{ url_for('search') }}" class="btn-nba-secondary" style="justify-content:center;">Browse League</a>
     </div>
+  </div>
 </div>
 
+<!-- Top players -->
 {% if top_players %}
-<div class="card">
-    <div class="card-header">
-        <h2 class="h5 mb-0">Top Players</h2>
-    </div>
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-striped mb-0 align-middle">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>OVR</th>
-                        <th>Age</th>
-                        <th>PPG</th>
-                        <th>RPG</th>
-                        <th>APG</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for player in top_players %}
-                    <tr>
-                        <td>{{ player.name }}</td>
-                        <td>{{ player.overall if player.overall is not none else '—' }}</td>
-                        <td>{{ player.age if player.age is not none else '—' }}</td>
-                        <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
-                        <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
-                        <td>{{ player.apg if player.apg is not none else '—' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
+<div class="card-nba">
+  <div class="card-nba-header">
+    <h2>Top Players on Your Roster</h2>
+    <a href="{{ url_for('team') }}" class="btn-nba-ghost">View All</a>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="table-nba" style="min-width:560px;">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>OVR</th>
+          <th>Age</th>
+          <th>PPG</th>
+          <th>RPG</th>
+          <th>APG</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for player in top_players %}
+        <tr>
+          <td style="font-weight:600;">{{ player.name }}</td>
+          <td>
+            {% if player.overall is not none %}
+            <span data-ovr="{{ player.overall }}">{{ player.overall }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ player.age if player.age is not none else '—' }}</td>
+          <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
+          <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
+          <td>{{ player.apg if player.apg is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
+
+<!-- Season shortcut -->
+<div class="mt-4 glass-liquid p-4" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;">
+  <div>
+    <div class="section-title">Season Hub</div>
+    <p style="margin:0;color:var(--text-muted);font-size:.875rem;">
+      {% if active_season %}
+      {{ active_season.season_year }} season · Phase: <strong style="color:var(--text);">{{ active_season.phase|replace('_',' ')|title }}</strong>
+      {% else %}
+      No season in progress — head to the Season page to start one.
+      {% endif %}
+    </p>
+  </div>
+  <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+    <a href="{{ url_for('season_hub') }}" class="btn-nba-blue">Go to Season</a>
+    <a href="{{ url_for('trade') }}" class="btn-nba-secondary">Trade Engine</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('[data-ovr]').forEach(el => {
+  const v = parseInt(el.dataset.ovr, 10);
+  el.classList.add('ovr-chip');
+  if (v >= 85) el.classList.add('ovr-elite');
+  else if (v >= 78) el.classList.add('ovr-great');
+  else if (v >= 70) el.classList.add('ovr-good');
+  else el.classList.add('ovr-avg');
+});
+</script>
 {% endblock %}

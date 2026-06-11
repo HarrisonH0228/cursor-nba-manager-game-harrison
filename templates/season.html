@@ -1,295 +1,302 @@
 {% extends "base.html" %}
 
 {% macro standings_table(rows, user_team_id) %}
-<div class="table-responsive">
-    <table class="table table-striped table-sm align-middle mb-0">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Team</th>
-                <th>W</th>
-                <th>L</th>
-                <th>Win%</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in rows %}
-            <tr class="{% if row.team_id == user_team_id %}table-success{% endif %}">
-                <td>{{ row.rank }}</td>
-                <td>
-                    {{ row.team_name }}
-                    {% if row.team_id == user_team_id %}
-                    <span class="badge bg-success ms-1">You</span>
-                    {% endif %}
-                </td>
-                <td>{{ row.w }}</td>
-                <td>{{ row.l }}</td>
-                <td>{{ '%.1f'|format(row.win_pct * 100) }}%</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div style="overflow-x:auto;">
+  <table class="table-nba">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Team</th>
+        <th>W</th>
+        <th>L</th>
+        <th>Win%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="{% if row.team_id == user_team_id %}user-row{% endif %}">
+        <td style="color:var(--text-muted);font-weight:600;">{{ row.rank }}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:.6rem;">
+            <img class="team-logo-sm" data-team-logo="{{ row.team_name }}" alt="" onerror="this.style.display='none'">
+            <span style="font-weight:{% if row.team_id == user_team_id %}700{% else %}500{% endif %};">{{ row.team_name }}</span>
+            {% if row.team_id == user_team_id %}
+            <span class="badge-nba badge-nba-blue badge-you">YOU</span>
+            {% endif %}
+          </div>
+        </td>
+        <td style="font-weight:600;color:#6ee7b7;">{{ row.w }}</td>
+        <td style="color:var(--text-muted);">{{ row.l }}</td>
+        <td style="color:var(--text-muted);">{{ '%.1f'|format(row.win_pct * 100) }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endmacro %}
 
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div>
-        <h1 class="mb-1">{{ page_title }}</h1>
-        {% if season %}
-        <p class="text-muted mb-0">
-            {{ season.season_year }} season
-            · Phase: {{ season.phase|replace('_', ' ')|title }}
-            {% if season.phase == 'regular' %}
-            · Day {{ season.current_day }} / {{ season.max_day }}
-            · {{ games_played }} / {{ season.schedule|length }} games played
-            {% endif %}
-        </p>
-        {% else %}
-        <p class="text-muted mb-0">Start a season to simulate games and track standings.</p>
-        {% endif %}
+<!-- Page header -->
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+  <div>
+    <p class="section-title">Season Hub</p>
+    <h1>{{ page_title }}</h1>
+    {% if season %}
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
+      <span class="badge-nba badge-nba-gray">{{ season.season_year }}</span>
+      <span class="badge-nba badge-nba-blue">{{ season.phase|replace('_',' ')|title }}</span>
+      {% if season.phase == 'regular' %}
+      <span style="color:var(--text-muted);font-size:.8rem;">Day {{ season.current_day }} / {{ season.max_day }} · {{ games_played }} / {{ season.schedule|length }} games</span>
+      {% endif %}
     </div>
-    <div class="d-flex flex-wrap gap-2">
-        {% if season %}
-        <a href="{{ url_for('season_hub') }}" class="btn btn-outline-secondary{% if page == 'hub' %} active{% endif %}">Standings</a>
-        <a href="{{ url_for('season_schedule') }}" class="btn btn-outline-secondary{% if page == 'schedule' %} active{% endif %}">Schedule</a>
-        <a href="{{ url_for('season_playoffs') }}" class="btn btn-outline-secondary{% if page == 'playoffs' %} active{% endif %}">Playoffs</a>
-        {% endif %}
-    </div>
+    {% else %}
+    <p class="text-muted-nba">Start a season to simulate games and track standings.</p>
+    {% endif %}
+  </div>
+
+  {% if season %}
+  <div style="display:flex;flex-wrap:wrap;gap:.5rem;">
+    <a href="{{ url_for('season_hub') }}" class="btn-nba-ghost {% if page == 'hub' %}active{% endif %}"
+       style="{% if page == 'hub' %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">Standings</a>
+    <a href="{{ url_for('season_schedule') }}" class="btn-nba-ghost {% if page == 'schedule' %}active{% endif %}"
+       style="{% if page == 'schedule' %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">Schedule</a>
+    <a href="{{ url_for('season_playoffs') }}" class="btn-nba-ghost {% if page == 'playoffs' %}active{% endif %}"
+       style="{% if page == 'playoffs' %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">Playoffs</a>
+  </div>
+  {% endif %}
 </div>
 
 {% if not season %}
-<form method="post" action="{{ url_for('season_start') }}">
-    <button type="submit" class="btn btn-primary btn-lg">Start Season</button>
-</form>
-{% elif page == 'playoffs' %}
-{% if season.playoffs is none %}
-{% if regular_complete or season.phase == 'regular_complete' %}
-<form method="post" action="{{ url_for('season_playoffs') }}" class="mb-4">
-    <button type="submit" class="btn btn-primary">Start Playoffs</button>
-</form>
-{% else %}
-<div class="alert alert-info">Complete the regular season before starting playoffs.</div>
-<form method="post" action="{{ url_for('season_sim_full') }}" class="mb-4">
-    <button type="submit" class="btn btn-outline-primary">Sim Full Season First</button>
-</form>
-{% endif %}
-{% else %}
-<div class="d-flex flex-wrap gap-2 mb-4">
-    <form method="post" action="{{ url_for('season_sim_playoffs') }}">
-        <input type="hidden" name="mode" value="round">
-        <button type="submit" class="btn btn-primary" {% if season.phase == 'complete' %}disabled{% endif %}>Sim Round</button>
-    </form>
-    <form method="post" action="{{ url_for('season_sim_playoffs') }}">
-        <input type="hidden" name="mode" value="all">
-        <button type="submit" class="btn btn-outline-primary" {% if season.phase == 'complete' %}disabled{% endif %}>Sim Playoffs</button>
-    </form>
+<!-- No season -->
+<div class="glass-liquid p-5 text-center" style="max-width:480px;margin:0 auto;">
+  <div style="font-size:3rem;margin-bottom:1rem;">🏀</div>
+  <h2 style="font-weight:800;margin-bottom:.75rem;">Ready to tip off?</h2>
+  <p class="text-muted-nba" style="margin-bottom:1.5rem;">Start a new season to simulate games, track standings, and make roster moves.</p>
+  <form method="post" action="{{ url_for('season_start') }}">
+    <button type="submit" class="btn-nba-primary btn-nba-lg">Start Season</button>
+  </form>
 </div>
+
+{% elif page == 'playoffs' %}
+<!-- ── PLAYOFFS ── -->
+{% if season.playoffs is none %}
+  {% if regular_complete or season.phase == 'regular_complete' %}
+  <div class="alert-nba alert-nba-info mb-4">Regular season complete. Seed the playoff bracket to continue.</div>
+  <form method="post" action="{{ url_for('season_playoffs') }}" class="mb-4">
+    <button type="submit" class="btn-nba-primary btn-nba-lg">Start Playoffs</button>
+  </form>
+  {% else %}
+  <div class="alert-nba alert-nba-warning mb-4">Complete the regular season before starting playoffs.</div>
+  <form method="post" action="{{ url_for('season_sim_full') }}" class="mb-4">
+    <button type="submit" class="btn-nba-secondary">Sim Full Regular Season</button>
+  </form>
+  {% endif %}
+{% else %}
 
 {% if season.playoffs.champion_name %}
-<div class="alert alert-success mb-4">
-    <strong>Champion:</strong> {{ season.playoffs.champion_name }}
+<div class="glass-liquid p-4 mb-4 text-center" style="border-top:2px solid #fbbf24;">
+  <div style="font-size:2rem;margin-bottom:.5rem;">🏆</div>
+  <div class="section-title" style="color:#fbbf24;">NBA Champion</div>
+  <div style="font-size:1.75rem;font-weight:900;">{{ season.playoffs.champion_name }}</div>
 </div>
 {% endif %}
 
-{% if season.phase == 'complete' %}
-<div class="mb-4">
-    <a href="{{ url_for('season_draft') }}" class="btn btn-warning">Go to Draft</a>
+<div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:1.5rem;">
+  <form method="post" action="{{ url_for('season_sim_playoffs') }}">
+    <input type="hidden" name="mode" value="round">
+    <button type="submit" class="btn-nba-primary" {% if season.phase == 'complete' %}disabled{% endif %}>Sim Round</button>
+  </form>
+  <form method="post" action="{{ url_for('season_sim_playoffs') }}">
+    <input type="hidden" name="mode" value="all">
+    <button type="submit" class="btn-nba-secondary" {% if season.phase == 'complete' %}disabled{% endif %}>Sim All Playoffs</button>
+  </form>
 </div>
+
+{% if season.phase == 'complete' %}
+<div class="mb-4"><a href="{{ url_for('season_draft') }}" class="btn-nba-primary">Go to Draft →</a></div>
 {% elif season.phase == 'offseason' %}
-<div class="mb-4">
-    <a href="{{ url_for('season_draft') }}" class="btn btn-success">Advance to Next Season</a>
+<div class="mb-4 d-flex gap-3 flex-wrap">
+  <a href="{{ url_for('season_draft') }}" class="btn-nba-secondary">Draft Summary</a>
+  <form method="post" action="{{ url_for('season_advance') }}">
+    <button type="submit" class="btn-nba-success">Advance to Next Season</button>
+  </form>
 </div>
 {% endif %}
 
 {% for round in season.playoffs.rounds %}
 {% if round.series %}
-<div class="card mb-3">
-    <div class="card-header">
-        <h2 class="h6 mb-0">{{ round.name }}</h2>
+<div class="card-nba mb-3">
+  <div class="card-nba-header"><h2>{{ round.name }}</h2></div>
+  {% for series in round.series %}
+  <div class="series-item">
+    <div>
+      <span style="font-weight:600;">{{ series.high_seed_name }}</span>
+      <span style="color:var(--text-muted);margin:0 .4rem;">vs</span>
+      <span style="font-weight:600;">{{ series.low_seed_name }}</span>
+      {% if series.conference != 'Finals' %}
+      <span style="color:var(--text-muted);font-size:.8rem;margin-left:.3rem;">({{ series.conference }})</span>
+      {% endif %}
     </div>
-    <ul class="list-group list-group-flush">
-        {% for series in round.series %}
-        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <span>
-                {{ series.high_seed_name }} vs {{ series.low_seed_name }}
-                {% if series.conference != 'Finals' %}
-                <span class="text-muted">({{ series.conference }})</span>
-                {% endif %}
-            </span>
-            <span>
-                {% if series.complete %}
-                <strong>{{ series.high_seed_name }} {{ series.high_wins }} – {{ series.low_wins }} {{ series.low_seed_name }}</strong>
-                · Winner: {{ series.winner_name }}
-                {% else %}
-                {{ series.high_wins }} – {{ series.low_wins }}
-                {% endif %}
-            </span>
-        </li>
-        {% endfor %}
-    </ul>
+    <div>
+      {% if series.complete %}
+      <span class="series-winner">{{ series.winner_name }}</span>
+      <span style="color:var(--text-muted);font-size:.85rem;margin-left:.5rem;">{{ series.high_wins }}–{{ series.low_wins }}</span>
+      {% else %}
+      <span style="color:var(--text-muted);">{{ series.high_wins }}–{{ series.low_wins }}</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
 </div>
 {% endif %}
 {% endfor %}
 {% endif %}
 
 {% elif page == 'schedule' %}
-<div class="d-flex flex-wrap gap-2 mb-4">
-    <form method="post" action="{{ url_for('season_sim_day') }}">
-        <button type="submit" class="btn btn-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Day</button>
-    </form>
-    <form method="post" action="{{ url_for('season_sim_week') }}">
-        <button type="submit" class="btn btn-outline-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Week</button>
-    </form>
-    <form method="post" action="{{ url_for('season_sim_trade_deadline') }}">
-        <button type="submit" class="btn btn-outline-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim to Trade Deadline</button>
-    </form>
-    <form method="post" action="{{ url_for('season_sim_full') }}">
-        <button type="submit" class="btn btn-outline-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Full Season</button>
-    </form>
+<!-- ── SCHEDULE ── -->
+<div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:1.5rem;">
+  <form method="post" action="{{ url_for('season_sim_day') }}">
+    <button type="submit" class="btn-nba-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Day</button>
+  </form>
+  <form method="post" action="{{ url_for('season_sim_week') }}">
+    <button type="submit" class="btn-nba-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Week</button>
+  </form>
+  <form method="post" action="{{ url_for('season_sim_trade_deadline') }}">
+    <button type="submit" class="btn-nba-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim to Trade Deadline</button>
+  </form>
+  <form method="post" action="{{ url_for('season_sim_full') }}">
+    <button type="submit" class="btn-nba-ghost" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Full Season</button>
+  </form>
 </div>
 
-<form method="get" action="{{ url_for('season_schedule') }}" class="row g-2 mb-4">
-    <div class="col-auto">
-        <label class="col-form-label" for="day">Day</label>
-    </div>
-    <div class="col-auto">
-        <input type="number" min="1" max="{{ season.max_day }}" name="day" id="day" class="form-control" value="{{ schedule_day }}">
-    </div>
-    <div class="col-auto">
-        <button type="submit" class="btn btn-secondary">Filter</button>
-    </div>
+<!-- Day filter -->
+<form method="get" action="{{ url_for('season_schedule') }}" style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem;flex-wrap:wrap;">
+  <label style="color:var(--text-muted);font-size:.875rem;" for="day">Day</label>
+  <input type="number" min="1" max="{{ season.max_day }}" name="day" id="day"
+         class="form-control-nba" style="width:90px;" value="{{ schedule_day }}">
+  <button type="submit" class="btn-nba-ghost">Filter</button>
 </form>
 
-<div class="table-responsive">
-    <table class="table table-striped table-hover align-middle">
-        <thead>
-            <tr>
-                <th>Day</th>
-                <th>Home</th>
-                <th>Away</th>
-                <th>Score</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for game in schedule %}
-            <tr>
-                <td>{{ game.day }}</td>
-                <td>{{ game.home_name }}</td>
-                <td>{{ game.away_name }}</td>
-                <td>
-                    {% if game.played %}
-                    <a href="{{ url_for('season_game_box_score', game_id=game.id) }}">
-                        {{ game.home_score }} – {{ game.away_score }}
-                    </a>
-                    {% else %}
-                    —
-                    {% endif %}
-                </td>
-                <td>
-                    {% if game.played %}
-                    <a href="{{ url_for('season_game_box_score', game_id=game.id) }}">Final</a>
-                    {% else %}
-                    Scheduled
-                    {% endif %}
-                </td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="5" class="text-center text-muted py-4">No games for this day.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="card-nba" style="overflow-x:auto;">
+  <table class="table-nba" style="min-width:520px;">
+    <thead>
+      <tr><th>Day</th><th>Home</th><th>Away</th><th>Score</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for game in schedule %}
+      <tr>
+        <td style="color:var(--text-muted);">{{ game.day }}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <img class="team-logo-sm" data-team-logo="{{ game.home_name }}" alt="" onerror="this.style.display='none'">
+            {{ game.home_name }}
+          </div>
+        </td>
+        <td>
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <img class="team-logo-sm" data-team-logo="{{ game.away_name }}" alt="" onerror="this.style.display='none'">
+            {{ game.away_name }}
+          </div>
+        </td>
+        <td>
+          {% if game.played %}
+          <a href="{{ url_for('season_game_box_score', game_id=game.id) }}" style="color:var(--text);font-weight:700;text-decoration:none;">
+            {{ game.home_score }} – {{ game.away_score }}
+          </a>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if game.played %}
+          <a href="{{ url_for('season_game_box_score', game_id=game.id) }}" class="badge-nba badge-nba-green" style="text-decoration:none;">Final</a>
+          {% else %}
+          <span class="badge-nba badge-nba-gray">Scheduled</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:2rem;">No games for this day.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 {% else %}
-<div class="d-flex flex-wrap gap-2 mb-4">
-    <form method="post" action="{{ url_for('season_sim_day') }}">
-        <button type="submit" class="btn btn-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Day</button>
-    </form>
-    <form method="post" action="{{ url_for('season_sim_week') }}">
-        <button type="submit" class="btn btn-outline-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Week</button>
-    </form>
-    <form method="post" action="{{ url_for('season_sim_trade_deadline') }}">
-        <button type="submit" class="btn btn-outline-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim to Trade Deadline</button>
-    </form>
-    <form method="post" action="{{ url_for('season_sim_full') }}">
-        <button type="submit" class="btn btn-outline-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Full Season</button>
-    </form>
+<!-- ── STANDINGS HUB ── -->
+<div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:1.5rem;">
+  <form method="post" action="{{ url_for('season_sim_day') }}">
+    <button type="submit" class="btn-nba-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Day</button>
+  </form>
+  <form method="post" action="{{ url_for('season_sim_week') }}">
+    <button type="submit" class="btn-nba-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Week</button>
+  </form>
+  <form method="post" action="{{ url_for('season_sim_trade_deadline') }}">
+    <button type="submit" class="btn-nba-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim to Trade Deadline</button>
+  </form>
+  <form method="post" action="{{ url_for('season_sim_full') }}">
+    <button type="submit" class="btn-nba-ghost" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Full Season</button>
+  </form>
 </div>
 
 {% if season.recent_results %}
-<div class="card mb-4">
-    <div class="card-header">
-        <h2 class="h6 mb-0">Recent Results</h2>
-    </div>
-    <ul class="list-group list-group-flush">
-        {% for result in season.recent_results[:8] %}
-        <li class="list-group-item">
-            Day {{ result.day }}:
-            {% if result.game_id %}
-            <a href="{{ url_for('season_game_box_score', game_id=result.game_id) }}">
-                {{ result.home_name }} {{ result.home_score }} – {{ result.away_score }} {{ result.away_name }}
-            </a>
-            {% else %}
-            {{ result.home_name }} {{ result.home_score }} – {{ result.away_score }} {{ result.away_name }}
-            {% endif %}
-            {% if result.top_scorer_name %}
-            <span class="text-muted"> · {{ result.top_scorer_name }} ({{ result.top_scorer_pts }} PTS)</span>
-            {% endif %}
-        </li>
-        {% endfor %}
-    </ul>
+<div class="card-nba mb-4">
+  <div class="card-nba-header"><h2>Recent Results</h2></div>
+  {% for result in season.recent_results[:8] %}
+  <div class="series-item">
+    <span style="color:var(--text-muted);font-size:.8rem;min-width:3.5rem;">Day {{ result.day }}</span>
+    <span style="flex:1;">
+      {% if result.game_id %}
+      <a href="{{ url_for('season_game_box_score', game_id=result.game_id) }}" style="text-decoration:none;color:var(--text);font-weight:600;">
+        {{ result.home_name }} <span style="color:#fbbf24;">{{ result.home_score }}</span>
+        – <span style="color:#fbbf24;">{{ result.away_score }}</span> {{ result.away_name }}
+      </a>
+      {% else %}
+      {{ result.home_name }} {{ result.home_score }} – {{ result.away_score }} {{ result.away_name }}
+      {% endif %}
+      {% if result.top_scorer_name %}
+      <span style="color:var(--text-muted);font-size:.8rem;"> · {{ result.top_scorer_name }} ({{ result.top_scorer_pts }} PTS)</span>
+      {% endif %}
+    </span>
+  </div>
+  {% endfor %}
 </div>
 {% endif %}
 
-<div class="row g-4">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header"><h2 class="h6 mb-0">Eastern Conference</h2></div>
-            <div class="card-body p-0">{{ standings_table(east_standings, user_team_id) }}</div>
-        </div>
+<!-- Standings -->
+<div class="row g-4 mb-4">
+  <div class="col-lg-6">
+    <div class="card-nba h-100">
+      <div class="card-nba-header">
+        <h2>Eastern Conference</h2>
+        <span class="badge-nba badge-nba-red">East</span>
+      </div>
+      <div class="card-nba-body p-0">{{ standings_table(east_standings, user_team_id) }}</div>
     </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header"><h2 class="h6 mb-0">Western Conference</h2></div>
-            <div class="card-body p-0">{{ standings_table(west_standings, user_team_id) }}</div>
-        </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card-nba h-100">
+      <div class="card-nba-header">
+        <h2>Western Conference</h2>
+        <span class="badge-nba badge-nba-blue">West</span>
+      </div>
+      <div class="card-nba-body p-0">{{ standings_table(west_standings, user_team_id) }}</div>
     </div>
+  </div>
 </div>
 
+<!-- Phase CTAs -->
 {% if regular_complete or season.phase == 'regular_complete' %}
-<div class="mt-4">
-    <a href="{{ url_for('season_playoffs') }}" class="btn btn-success">Go to Playoffs</a>
-</div>
+<div class="mt-2"><a href="{{ url_for('season_playoffs') }}" class="btn-nba-success btn-nba-lg">Go to Playoffs →</a></div>
 {% endif %}
-
 {% if season.phase == 'complete' %}
-<div class="mt-4">
-    <a href="{{ url_for('season_draft') }}" class="btn btn-success">Start Draft</a>
-</div>
+<div class="mt-2"><a href="{{ url_for('season_draft') }}" class="btn-nba-primary btn-nba-lg">Start Draft →</a></div>
 {% elif season.phase == 'draft' %}
-<div class="mt-4">
-    <a href="{{ url_for('season_draft') }}" class="btn btn-primary">Continue Draft</a>
-</div>
+<div class="mt-2"><a href="{{ url_for('season_draft') }}" class="btn-nba-primary btn-nba-lg">Continue Draft →</a></div>
 {% elif season.phase == 'offseason' %}
-<div class="mt-4 d-flex flex-wrap gap-2">
-    <a href="{{ url_for('season_draft') }}" class="btn btn-outline-secondary">Draft Summary</a>
-    <form method="post" action="{{ url_for('season_advance') }}">
-        <button type="submit" class="btn btn-success">Advance to Next Season</button>
-    </form>
-</div>
-{% endif %}
-
-{% if season.phase == 'complete' %}
-<div class="mt-4">
-    <a href="{{ url_for('season_draft') }}" class="btn btn-warning">Go to Draft</a>
-</div>
-{% elif season.phase == 'offseason' %}
-<div class="mt-4">
-    <a href="{{ url_for('season_draft') }}" class="btn btn-success">Advance to Next Season</a>
+<div class="mt-2 d-flex flex-wrap gap-3">
+  <a href="{{ url_for('season_draft') }}" class="btn-nba-secondary">Draft Summary</a>
+  <form method="post" action="{{ url_for('season_advance') }}">
+    <button type="submit" class="btn-nba-success btn-nba-lg">Advance to Next Season</button>
+  </form>
 </div>
 {% endif %}
 {% endif %}

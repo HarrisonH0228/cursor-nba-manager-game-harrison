@@ -1,267 +1,269 @@
 {% extends "base.html" %}
-{% from "_roster_table.html" import roster_table %}
 
 {% macro stat_cell(player, stat_key) %}
 {{ player[stat_key] if player[stat_key] is not none else '—' }}
 {% if player[stat_key] is not none and (sort == stat_key or player.id == selected_id) and player.ranks.get(stat_key) %}
-<span class="badge bg-secondary ms-1">#{{ player.ranks[stat_key] }}</span>
+<span class="badge-nba badge-nba-gray" style="font-size:.65rem;">#{{ player.ranks[stat_key] }}</span>
 {% endif %}
 {% endmacro %}
 
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-    <div>
-        <h1 class="mb-1">{{ page_title }}</h1>
-        {% if last_updated %}
-        <p class="text-muted mb-0">Last updated: {{ last_updated }}</p>
-        {% endif %}
-    </div>
-    <a href="{{ url_for('refresh') }}" class="btn btn-outline-primary">Refresh Data</a>
+<div class="page-header d-flex flex-wrap align-items-center justify-content-between gap-3">
+  <div>
+    <p class="section-title">{% if view == 'roster' %}Team Roster{% elif view == 'teams' %}League Teams{% else %}Player Search{% endif %}</p>
+    <h1>{{ page_title }}</h1>
+    {% if last_updated %}<p class="text-muted-nba" style="font-size:.8rem;">Data updated {{ last_updated }}</p>{% endif %}
+  </div>
+  <a href="{{ url_for('refresh') }}" class="btn-nba-secondary">Refresh Data</a>
 </div>
 
 {% if refreshed %}
-<div class="alert alert-success">Player data refreshed successfully.</div>
+<div class="alert-nba alert-nba-success mb-4">Player data refreshed successfully.</div>
 {% endif %}
-
 {% if stale %}
-<div class="alert alert-warning">
-    Refresh failed. Showing the most recent cached data{% if last_updated %} from {{ last_updated }}{% endif %}.
-    Data may be outdated.
+<div class="alert-nba alert-nba-warning mb-4">
+  Refresh failed — showing cached data{% if last_updated %} from {{ last_updated }}{% endif %}. Data may be outdated.
 </div>
 {% endif %}
 
-<form method="get" action="{{ url_for('search') }}" class="row g-2 mb-4">
-    <input type="hidden" name="sort" value="{{ sort }}">
-    <input type="hidden" name="order" value="{{ order }}">
-    {% if view == 'roster' and roster_team_id is not none %}
-    <input type="hidden" name="view" value="roster">
-    <input type="hidden" name="team_id" value="{{ roster_team_id }}">
-    {% endif %}
-    {% if view == 'players' and selected_id is not none %}
-    <input type="hidden" name="selected" value="{{ selected_id }}">
-    {% endif %}
-    {% if view != 'roster' %}
-    <div class="col-md-2">
-        <select name="view" class="form-select" onchange="this.form.submit()">
-            <option value="players" {% if view == 'players' %}selected{% endif %}>Players</option>
-            <option value="teams" {% if view == 'teams' %}selected{% endif %}>Teams</option>
-        </select>
-    </div>
-    {% endif %}
-    <div class="col-md-{% if view == 'roster' %}9{% else %}7{% endif %}">
-        <input
-            type="search"
-            name="q"
-            class="form-control"
-            placeholder="{% if view == 'teams' %}Search teams by name{% elif view == 'roster' %}Search not available on roster view{% else %}Search players by name{% endif %}"
-            value="{{ q }}"
-            {% if view == 'roster' %}disabled{% endif %}
-        >
-    </div>
-    <div class="col-md-3">
-        <button type="submit" class="btn btn-primary w-100" {% if view == 'roster' %}disabled{% endif %}>Search</button>
-    </div>
-</form>
+<!-- Search form -->
+<div class="card-nba mb-4">
+  <div class="card-nba-body" style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;">
+    <form method="get" action="{{ url_for('search') }}" style="display:flex;gap:.75rem;flex:1;flex-wrap:wrap;align-items:center;">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="order" value="{{ order }}">
+      {% if view == 'roster' and roster_team_id is not none %}
+      <input type="hidden" name="view" value="roster">
+      <input type="hidden" name="team_id" value="{{ roster_team_id }}">
+      {% endif %}
+      {% if view == 'players' and selected_id is not none %}
+      <input type="hidden" name="selected" value="{{ selected_id }}">
+      {% endif %}
+
+      {% if view != 'roster' %}
+      <select name="view" class="form-select-nba" style="width:130px;" onchange="this.form.submit()">
+        <option value="players" {% if view == 'players' %}selected{% endif %}>Players</option>
+        <option value="teams"   {% if view == 'teams'   %}selected{% endif %}>Teams</option>
+      </select>
+      {% endif %}
+
+      <input type="search" name="q" class="form-control-nba" style="flex:1;min-width:200px;"
+             placeholder="{% if view == 'teams' %}Search teams…{% elif view == 'roster' %}Roster view{% else %}Search players…{% endif %}"
+             value="{{ q }}" {% if view == 'roster' %}disabled{% endif %}>
+
+      <button type="submit" class="btn-nba-primary" {% if view == 'roster' %}disabled{% endif %}>Search</button>
+    </form>
+  </div>
+</div>
 
 {% if view == 'players' %}
+<!-- ── PLAYERS ── -->
 {% if selected_player %}
-<div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+<div class="card-nba mb-4" style="border-color:rgba(29,66,138,0.4);">
+  <div class="card-nba-body" style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.75rem;">
     <div>
-        <strong>{{ selected_player.name }}</strong>
-        —
-        {%- if selected_player.overall is not none -%}
-        OVR {{ selected_player.overall }}{%- if selected_ranks.get('overall') %} (#{{ selected_ranks.overall }}){% endif -%}
-        {%- endif -%}
+      <div style="font-weight:800;font-size:1.1rem;margin-bottom:.35rem;">{{ selected_player.name }}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;">
+        {% if selected_player.overall is not none %}
+        <span data-ovr="{{ selected_player.overall }}">{{ selected_player.overall }}</span>
+        {% if selected_ranks.get('overall') %}<span class="badge-nba badge-nba-gray">OVR #{{ selected_ranks.overall }}</span>{% endif %}
+        {% endif %}
         {%- set rank_parts = [] -%}
         {%- for stat in stat_columns -%}
         {%- if selected_ranks.get(stat) -%}
         {%- set _ = rank_parts.append(stat_labels[stat] ~ ' #' ~ selected_ranks[stat]) -%}
         {%- endif -%}
         {%- endfor -%}
-        {% if rank_parts %} · {{ rank_parts | join(' · ') }}{% endif %}
+        {% for part in rank_parts %}
+        <span class="badge-nba badge-nba-gray">{{ part }}</span>
+        {% endfor %}
+      </div>
     </div>
-    <a href="{{ make_search_url(selected=None) }}" class="btn btn-sm btn-outline-secondary">Clear selection</a>
+    <a href="{{ make_search_url(selected=None) }}" class="btn-nba-ghost">Clear</a>
+  </div>
 </div>
 {% endif %}
 
 {% if not last_updated and not players %}
-<div class="alert alert-warning">
-    No player data yet. Click <strong>Refresh Data</strong> to load stats from the API.
+<div class="alert-nba alert-nba-warning mb-4">
+  No player data yet. Click <strong>Refresh Data</strong> to load stats from the API.
 </div>
 {% endif %}
 
-<div class="table-responsive">
-    <table class="table table-striped table-hover align-middle">
-        <thead>
-            <tr>
-                <th>
-                    <a href="{{ make_search_url(sort='name', order=next_order('name', sort, order)) }}" class="text-decoration-none">
-                        Name{% if sort == 'name' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='team', order=next_order('team', sort, order)) }}" class="text-decoration-none">
-                        Team{% if sort == 'team' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='overall', order=next_order('overall', sort, order)) }}" class="text-decoration-none">
-                        OVR{% if sort == 'overall' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='ppg', order=next_order('ppg', sort, order)) }}" class="text-decoration-none">
-                        PPG{% if sort == 'ppg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='rpg', order=next_order('rpg', sort, order)) }}" class="text-decoration-none">
-                        RPG{% if sort == 'rpg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='apg', order=next_order('apg', sort, order)) }}" class="text-decoration-none">
-                        APG{% if sort == 'apg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='spg', order=next_order('spg', sort, order)) }}" class="text-decoration-none">
-                        SPG{% if sort == 'spg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='bpg', order=next_order('bpg', sort, order)) }}" class="text-decoration-none">
-                        BPG{% if sort == 'bpg' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for player in players %}
-            <tr class="{% if player.id == selected_id %}table-primary{% endif %}">
-                <td>
-                    <a href="{{ make_search_url(selected=player.id) }}" class="text-decoration-none">
-                        {{ player.name }}
-                    </a>
-                </td>
-                <td>{{ player.team }}</td>
-                <td>{{ stat_cell(player, 'overall') }}</td>
-                <td>{{ stat_cell(player, 'ppg') }}</td>
-                <td>{{ stat_cell(player, 'rpg') }}</td>
-                <td>{{ stat_cell(player, 'apg') }}</td>
-                <td>{{ stat_cell(player, 'spg') }}</td>
-                <td>{{ stat_cell(player, 'bpg') }}</td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="8" class="text-center text-muted py-4">
-                    {% if q %}
-                    No players match "{{ q }}".
-                    {% else %}
-                    No players to display.
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<!-- Sort bar -->
+<div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
+  {% for col, label in [('name','Name'),('team','Team'),('overall','OVR'),('ppg','PPG'),('rpg','RPG'),('apg','APG'),('spg','SPG'),('bpg','BPG')] %}
+  <a href="{{ make_search_url(sort=col, order=next_order(col, sort, order)) }}"
+     class="btn-nba-ghost"
+     style="{% if sort == col %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">
+    {{ label }}{% if sort == col %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+<div class="card-nba" style="overflow-x:auto;">
+  <table class="table-nba" style="min-width:680px;">
+    <thead>
+      <tr>
+        <th>Player</th><th>Team</th><th>OVR</th>
+        <th>PPG</th><th>RPG</th><th>APG</th><th>SPG</th><th>BPG</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for player in players %}
+      <tr class="{% if player.id == selected_id %}user-row{% endif %}">
+        <td>
+          <a href="{{ make_search_url(selected=player.id) }}" style="font-weight:600;text-decoration:none;color:var(--text);">
+            {{ player.name }}
+          </a>
+        </td>
+        <td style="color:var(--text-muted);">{{ player.team }}</td>
+        <td>
+          {% if player.overall is not none %}
+          <span data-ovr="{{ player.overall }}">{{ player.overall }}{% if sort == 'overall' and player.ranks.get('overall') %}<span style="font-size:.65rem;color:var(--text-dim);margin-left:2px;">#{{ player.ranks.overall }}</span>{% endif %}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ stat_cell(player, 'ppg') }}</td>
+        <td>{{ stat_cell(player, 'rpg') }}</td>
+        <td>{{ stat_cell(player, 'apg') }}</td>
+        <td>{{ stat_cell(player, 'spg') }}</td>
+        <td>{{ stat_cell(player, 'bpg') }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:2.5rem;">
+        {% if q %}No players match "{{ q }}".{% else %}No players to display.{% endif %}
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 {% elif view == 'roster' %}
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div>
-        <a href="{{ make_search_url(view='teams', sort='team', order='asc') }}" class="text-decoration-none">&larr; Back to Teams</a>
-        <h2 class="h4 mb-1 mt-2">{{ roster_team_name }}</h2>
-        <p class="text-muted mb-0">
-            {% if roster_team_overall is not none %}
-            Team OVR {{ roster_team_overall }}{% if roster_team_rank %} (#{{ roster_team_rank }}){% endif %}
-            {% endif %}
-            · {{ roster|length }} players
-            {% if is_user_team %}
-            <span class="badge bg-success ms-1">Your Team</span>
-            {% endif %}
-        </p>
-        <p class="small text-muted mb-0 mt-1">Top 8 qualified players (20+ GP); top 3 weighted 2.5x; under 40 GP at 1/3 weight</p>
+<!-- ── TEAM ROSTER ── -->
+<div class="page-header d-flex flex-wrap align-items-center gap-4 mb-4" style="margin-bottom:1.5rem!important;">
+  <img class="team-logo-lg" data-team-logo="{{ roster_team_name }}" alt="{{ roster_team_name }}" onerror="this.style.display='none'">
+  <div>
+    <a href="{{ make_search_url(view='teams', sort='team', order='asc') }}" class="btn-nba-ghost mb-2">← All Teams</a>
+    <h2 style="font-size:1.75rem;font-weight:800;letter-spacing:-.02em;margin-bottom:.35rem;">{{ roster_team_name }}</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;">
+      {% if roster_team_overall is not none %}
+      <span data-ovr="{{ roster_team_overall }}">{{ roster_team_overall }}</span>
+      {% if roster_team_rank %}<span class="badge-nba badge-nba-gray">League #{{ roster_team_rank }}</span>{% endif %}
+      {% endif %}
+      <span class="badge-nba badge-nba-blue">{{ roster|length }} players</span>
+      {% if is_user_team %}<span class="badge-nba badge-nba-blue badge-you">YOUR TEAM</span>{% endif %}
     </div>
+  </div>
 </div>
 
-{{ roster_table(roster, sort, order, make_search_url, next_order, positions_label=positions_label) }}
+<!-- Sort bar -->
+<div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
+  {% for col, label in [('overall','OVR'),('name','Name'),('age','Age'),('gp','GP'),('ppg','PPG'),('rpg','RPG'),('apg','APG'),('spg','SPG'),('bpg','BPG')] %}
+  <a href="{{ make_search_url(sort=col, order=next_order(col, sort, order)) }}"
+     class="btn-nba-ghost"
+     style="{% if sort == col %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">
+    {{ label }}{% if sort == col %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+<div class="card-nba" style="overflow-x:auto;">
+  <table class="table-nba" style="min-width:640px;">
+    <thead>
+      <tr><th>Player</th><th>OVR</th><th>Pos</th><th>Age</th><th>GP</th><th>PPG</th><th>RPG</th><th>APG</th><th>SPG</th><th>BPG</th></tr>
+    </thead>
+    <tbody>
+      {% for player in roster %}
+      <tr>
+        <td style="font-weight:600;">{{ player.name }}</td>
+        <td>{% if player.overall is not none %}<span data-ovr="{{ player.overall }}">{{ player.overall }}</span>{% else %}—{% endif %}</td>
+        <td><span class="badge-nba badge-nba-gray">{{ positions_label(player.positions) }}</span></td>
+        <td>{{ player.age if player.age is not none else '—' }}</td>
+        <td style="color:var(--text-muted);">{{ player.gp if player.gp is not none else '—' }}</td>
+        <td>{{ player.ppg if player.ppg is not none else '—' }}</td>
+        <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
+        <td>{{ player.apg if player.apg is not none else '—' }}</td>
+        <td style="color:var(--text-muted);">{{ player.spg if player.spg is not none else '—' }}</td>
+        <td style="color:var(--text-muted);">{{ player.bpg if player.bpg is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 
 {% else %}
+<!-- ── TEAMS ── -->
 {% if not last_updated and not teams %}
-<div class="alert alert-warning">
-    No player data yet. Click <strong>Refresh Data</strong> to load stats from the API.
-</div>
+<div class="alert-nba alert-nba-warning mb-4">No player data yet. Click <strong>Refresh Data</strong> to load stats.</div>
 {% endif %}
 
-<div class="table-responsive">
-    <table class="table table-striped table-hover align-middle">
-        <thead>
-            <tr>
-                <th>
-                    <a href="{{ make_search_url(sort='team', order=next_order('team', sort, order)) }}" class="text-decoration-none">
-                        Team{% if sort == 'team' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='overall', order=next_order('overall', sort, order)) }}" class="text-decoration-none">
-                        OVR{% if sort == 'overall' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>
-                    <a href="{{ make_search_url(sort='roster_size', order=next_order('roster_size', sort, order)) }}" class="text-decoration-none">
-                        Roster{% if sort == 'roster_size' %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
-                    </a>
-                </th>
-                <th>Top Player</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for team_summary in teams %}
-            <tr class="{% if user_team_id and team_summary.team_id == user_team_id %}table-success{% endif %}">
-                <td>
-                    <a href="{{ make_search_url(view='roster', team_id=team_summary.team_id, sort='overall', order='desc') }}" class="text-decoration-none">
-                        {{ team_summary.team }}
-                    </a>
-                    {% if user_team_id and team_summary.team_id == user_team_id %}
-                    <span class="badge bg-success ms-1">Your Team</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if team_summary.overall is not none %}
-                    {{ team_summary.overall }}
-                    {% if team_summary.ranks.get('overall') %}
-                    <span class="badge bg-secondary ms-1">#{{ team_summary.ranks.overall }}</span>
-                    {% endif %}
-                    {% else %}
-                    —
-                    {% endif %}
-                </td>
-                <td>{{ team_summary.roster_size }}</td>
-                <td>
-                    {% if team_summary.top_player_name %}
-                    {{ team_summary.top_player_name }}
-                    {% if team_summary.top_player_overall is not none %}
-                    ({{ team_summary.top_player_overall }})
-                    {% endif %}
-                    {% else %}
-                    —
-                    {% endif %}
-                </td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="4" class="text-center text-muted py-4">
-                    {% if q %}
-                    No teams match "{{ q }}".
-                    {% else %}
-                    No teams to display.
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<!-- Sort bar -->
+<div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
+  {% for col, label in [('team','Team'),('overall','OVR'),('roster_size','Roster')] %}
+  <a href="{{ make_search_url(sort=col, order=next_order(col, sort, order)) }}"
+     class="btn-nba-ghost"
+     style="{% if sort == col %}background:rgba(200,16,46,0.12);border-color:rgba(200,16,46,0.3);color:#ff4d6a;{% endif %}">
+    {{ label }}{% if sort == col %} {{ '↑' if order == 'asc' else '↓' }}{% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+<div class="card-nba" style="overflow-x:auto;">
+  <table class="table-nba" style="min-width:440px;">
+    <thead>
+      <tr><th>Team</th><th>OVR</th><th>Roster</th><th>Top Player</th></tr>
+    </thead>
+    <tbody>
+      {% for team_summary in teams %}
+      <tr class="{% if user_team_id and team_summary.team_id == user_team_id %}user-row{% endif %}">
+        <td>
+          <a href="{{ make_search_url(view='roster', team_id=team_summary.team_id, sort='overall', order='desc') }}"
+             style="display:flex;align-items:center;gap:.65rem;text-decoration:none;color:var(--text);font-weight:600;">
+            <img class="team-logo-sm" data-team-logo="{{ team_summary.team }}" alt="" onerror="this.style.display='none'">
+            {{ team_summary.team }}
+          </a>
+          {% if user_team_id and team_summary.team_id == user_team_id %}
+          <span class="badge-nba badge-nba-blue badge-you ms-1">YOU</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if team_summary.overall is not none %}
+          <span data-ovr="{{ team_summary.overall }}">{{ team_summary.overall }}</span>
+          {% if team_summary.ranks.get('overall') %}
+          <span style="font-size:.7rem;color:var(--text-dim);margin-left:3px;">#{{ team_summary.ranks.overall }}</span>
+          {% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td style="color:var(--text-muted);">{{ team_summary.roster_size }}</td>
+        <td style="color:var(--text-muted);">
+          {% if team_summary.top_player_name %}
+          {{ team_summary.top_player_name }}
+          {% if team_summary.top_player_overall is not none %}
+          <span style="color:var(--text-dim);font-size:.8rem;">({{ team_summary.top_player_overall }})</span>
+          {% endif %}
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:2.5rem;">
+        {% if q %}No teams match "{{ q }}".{% else %}No teams to display.{% endif %}
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('[data-ovr]').forEach(el => {
+  const v = parseInt(el.dataset.ovr, 10);
+  el.classList.add('ovr-chip');
+  if (v >= 85) el.classList.add('ovr-elite');
+  else if (v >= 78) el.classList.add('ovr-great');
+  else if (v >= 70) el.classList.add('ovr-good');
+  else el.classList.add('ovr-avg');
+});
+</script>
 {% endblock %}

@@ -1,218 +1,256 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div>
-        <h1 class="mb-1">Trade Engine</h1>
-        <p class="text-muted mb-0">
-            {{ season.season_year }} season
-            · Phase: {{ season.phase|replace('_', ' ')|title }}
-            · Your roster: {{ user_roster_size }} / {{ max_roster }}
-        </p>
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+  <div>
+    <p class="section-title">Trade Engine</p>
+    <h1>Trade Center</h1>
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
+      {% if season %}
+      <span class="badge-nba badge-nba-gray">{{ season.season_year }}</span>
+      <span class="badge-nba badge-nba-blue">{{ season.phase|replace('_',' ')|title }}</span>
+      <span style="color:var(--text-muted);font-size:.8rem;">Roster: {{ user_roster_size }} / {{ max_roster }}</span>
+      {% endif %}
     </div>
+  </div>
 </div>
 
-<div class="alert {% if can_trade %}alert-success{% else %}alert-warning{% endif %} mb-4">
-    {{ trade_message }}
+<!-- Trade window status -->
+<div class="alert-nba {% if can_trade %}alert-nba-success{% else %}alert-nba-warning{% endif %} mb-4">
+  {{ trade_message }}
 </div>
 
-<form method="get" action="{{ url_for('trade') }}" class="row g-2 mb-4">
-    <div class="col-auto">
-        <label class="col-form-label" for="partner">Trade with</label>
-    </div>
-    <div class="col-auto">
-        <select name="partner" id="partner" class="form-select" onchange="this.form.submit()">
-            <option value="">Select team…</option>
-            {% for team in teams %}
-            <option value="{{ team.team_id }}" {% if partner_id == team.team_id %}selected{% endif %}>
-                {{ team.team_name }}
-            </option>
-            {% endfor %}
-        </select>
-    </div>
-</form>
+<!-- Partner selector -->
+<div class="card-nba mb-4">
+  <div class="card-nba-body" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <label style="font-weight:600;color:var(--text-muted);font-size:.875rem;white-space:nowrap;">Trade partner</label>
+    <form method="get" action="{{ url_for('trade') }}" style="display:flex;gap:.75rem;flex:1;min-width:200px;flex-wrap:wrap;">
+      <select name="partner" class="form-select-nba" style="flex:1;min-width:180px;" onchange="this.form.submit()">
+        <option value="">Select a team…</option>
+        {% for team in teams %}
+        <option value="{{ team.team_id }}" {% if partner_id == team.team_id %}selected{% endif %}>
+          {{ team.team_name }}
+        </option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</div>
 
 {% if partner_id %}
 <form method="post" action="{{ url_for('trade_propose') }}" id="trade-form">
-    <input type="hidden" name="partner_id" value="{{ partner_id }}">
+  <input type="hidden" name="partner_id" value="{{ partner_id }}">
 
-    <div class="card mb-4" id="trade-meter-card">
-        <div class="card-body">
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                <h2 class="h6 mb-0">Trade appeal for {{ partner_name }}</h2>
-                <span class="badge bg-secondary" id="trade-meter-label">Select assets to preview</span>
-            </div>
-            <div class="progress mb-2" style="height: 1.25rem;">
-                <div class="progress-bar bg-secondary" id="trade-meter-bar" role="progressbar"
-                     style="width: 50%" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100"></div>
-            </div>
-            <p class="small text-muted mb-0" id="trade-meter-detail">
-                They receive: — · They send: — · Net: —
-            </p>
+  <!-- Trade meter -->
+  <div class="card-nba mb-4" id="trade-meter-card">
+    <div class="card-nba-body">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.75rem;margin-bottom:.75rem;">
+        <div>
+          <div class="section-title">Trade Appeal — {{ partner_name }}</div>
+          <span id="trade-meter-label" class="badge-nba badge-nba-gray">Select assets to preview</span>
         </div>
+      </div>
+      <div class="progress-nba mb-2">
+        <div class="progress-nba-bar" id="trade-meter-bar" style="width:50%;"></div>
+      </div>
+      <p style="font-size:.8rem;color:var(--text-muted);margin:0;" id="trade-meter-detail">
+        They receive: — · They send: — · Net: —
+      </p>
+    </div>
+  </div>
+
+  <!-- Trade columns -->
+  <div class="row g-4 mb-4">
+    <div class="col-lg-6">
+      <div class="card-nba h-100">
+        <div class="card-nba-header">
+          <h2>You Send</h2>
+        </div>
+        <div class="card-nba-body">
+          <div class="section-title">Players</div>
+          {% if user_roster %}
+          <div style="border-radius:var(--radius-sm);border:1px solid var(--border);overflow:hidden;margin-bottom:1rem;">
+            {% for player in user_roster %}
+            <label class="check-list-item" for="out-p-{{ player.id }}">
+              <div style="display:flex;align-items:center;gap:.6rem;flex:1;">
+                <input type="checkbox" name="outgoing_players" value="{{ player.id }}"
+                       id="out-p-{{ player.id }}" {% if not can_trade %}disabled{% endif %}>
+                <span style="font-weight:500;">{{ player.name }}</span>
+              </div>
+              <span data-ovr="{{ player.overall }}">{{ player.overall if player.overall else '—' }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-muted-nba mb-3">No players on roster.</p>
+          {% endif %}
+
+          <div class="section-title">Draft Picks</div>
+          {% if user_picks %}
+          <div style="border-radius:var(--radius-sm);border:1px solid var(--border);overflow:hidden;">
+            {% for pick in user_picks %}
+            <label class="check-list-item" for="out-pk-{{ pick.id }}">
+              <div style="display:flex;align-items:center;gap:.6rem;flex:1;">
+                <input type="checkbox" name="outgoing_picks" value="{{ pick.id }}"
+                       id="out-pk-{{ pick.id }}" {% if not can_trade %}disabled{% endif %}>
+                <span style="font-weight:500;">{{ pick.year }} Round {{ pick.round }}</span>
+              </div>
+              <span class="badge-nba badge-nba-gray">#{{ pick.overall }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-muted-nba mb-0">No picks available.</p>
+          {% endif %}
+        </div>
+      </div>
     </div>
 
-    <div class="row g-4 mb-4">
-        <div class="col-lg-6">
-            <div class="card h-100">
-                <div class="card-header">
-                    <h2 class="h6 mb-0">You send</h2>
-                </div>
-                <div class="card-body">
-                    <h3 class="h6 text-muted">Players</h3>
-                    {% if user_roster %}
-                    <div class="list-group mb-3">
-                        {% for player in user_roster %}
-                        <label class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>
-                                <input type="checkbox" name="outgoing_players" value="{{ player.id }}"
-                                       class="form-check-input me-2" {% if not can_trade %}disabled{% endif %}>
-                                {{ player.name }}
-                            </span>
-                            <span class="text-muted">OVR {{ player.overall }}</span>
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p class="text-muted">No players on roster.</p>
-                    {% endif %}
-
-                    <h3 class="h6 text-muted">Draft picks</h3>
-                    {% if user_picks %}
-                    <div class="list-group">
-                        {% for pick in user_picks %}
-                        <label class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>
-                                <input type="checkbox" name="outgoing_picks" value="{{ pick.id }}"
-                                       class="form-check-input me-2" {% if not can_trade %}disabled{% endif %}>
-                                {{ pick.year }} Round {{ pick.round }} (#{{ pick.overall }})
-                            </span>
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p class="text-muted mb-0">No picks available.</p>
-                    {% endif %}
-                </div>
-            </div>
+    <div class="col-lg-6">
+      <div class="card-nba h-100">
+        <div class="card-nba-header">
+          <h2>You Receive from {{ partner_name }}</h2>
+          <img class="team-logo-sm" data-team-logo="{{ partner_name }}" alt="" onerror="this.style.display='none'">
         </div>
+        <div class="card-nba-body">
+          <div class="section-title">Players</div>
+          {% if partner_roster %}
+          <div style="border-radius:var(--radius-sm);border:1px solid var(--border);overflow:hidden;margin-bottom:1rem;">
+            {% for player in partner_roster %}
+            <label class="check-list-item" for="in-p-{{ player.id }}">
+              <div style="display:flex;align-items:center;gap:.6rem;flex:1;">
+                <input type="checkbox" name="incoming_players" value="{{ player.id }}"
+                       id="in-p-{{ player.id }}" {% if not can_trade %}disabled{% endif %}>
+                <span style="font-weight:500;">{{ player.name }}</span>
+              </div>
+              <span data-ovr="{{ player.overall }}">{{ player.overall if player.overall else '—' }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-muted-nba mb-3">No players on roster.</p>
+          {% endif %}
 
-        <div class="col-lg-6">
-            <div class="card h-100">
-                <div class="card-header">
-                    <h2 class="h6 mb-0">You receive from {{ partner_name }}</h2>
-                </div>
-                <div class="card-body">
-                    <h3 class="h6 text-muted">Players</h3>
-                    {% if partner_roster %}
-                    <div class="list-group mb-3">
-                        {% for player in partner_roster %}
-                        <label class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>
-                                <input type="checkbox" name="incoming_players" value="{{ player.id }}"
-                                       class="form-check-input me-2" {% if not can_trade %}disabled{% endif %}>
-                                {{ player.name }}
-                            </span>
-                            <span class="text-muted">OVR {{ player.overall }}</span>
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p class="text-muted">No players on roster.</p>
-                    {% endif %}
-
-                    <h3 class="h6 text-muted">Draft picks</h3>
-                    {% if partner_picks %}
-                    <div class="list-group">
-                        {% for pick in partner_picks %}
-                        <label class="list-group-item d-flex justify-content-between align-items-center">
-                            <span>
-                                <input type="checkbox" name="incoming_picks" value="{{ pick.id }}"
-                                       class="form-check-input me-2" {% if not can_trade %}disabled{% endif %}>
-                                {{ pick.year }} Round {{ pick.round }} (#{{ pick.overall }})
-                            </span>
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p class="text-muted mb-0">No picks available.</p>
-                    {% endif %}
-                </div>
-            </div>
+          <div class="section-title">Draft Picks</div>
+          {% if partner_picks %}
+          <div style="border-radius:var(--radius-sm);border:1px solid var(--border);overflow:hidden;">
+            {% for pick in partner_picks %}
+            <label class="check-list-item" for="in-pk-{{ pick.id }}">
+              <div style="display:flex;align-items:center;gap:.6rem;flex:1;">
+                <input type="checkbox" name="incoming_picks" value="{{ pick.id }}"
+                       id="in-pk-{{ pick.id }}" {% if not can_trade %}disabled{% endif %}>
+                <span style="font-weight:500;">{{ pick.year }} Round {{ pick.round }}</span>
+              </div>
+              <span class="badge-nba badge-nba-gray">#{{ pick.overall }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-muted-nba mb-0">No picks available.</p>
+          {% endif %}
         </div>
+      </div>
     </div>
+  </div>
 
-    <button type="submit" class="btn btn-primary btn-lg" {% if not can_trade %}disabled{% endif %}>
-        Propose Trade
-    </button>
+  <button type="submit" class="btn-nba-primary btn-nba-lg" {% if not can_trade %}disabled{% endif %}>
+    Propose Trade
+  </button>
 </form>
-<script>
-(function () {
-    const form = document.getElementById("trade-form");
-    if (!form) return;
-
-    const bar = document.getElementById("trade-meter-bar");
-    const label = document.getElementById("trade-meter-label");
-    const detail = document.getElementById("trade-meter-detail");
-    const partnerId = {{ partner_id }};
-
-    function selectedValues(name) {
-        return Array.from(form.querySelectorAll(`input[name="${name}"]:checked`)).map(el => el.value);
-    }
-
-    function updateMeter() {
-        fetch("{{ url_for('trade_evaluate') }}", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                partner_id: partnerId,
-                outgoing_players: selectedValues("outgoing_players"),
-                outgoing_picks: selectedValues("outgoing_picks"),
-                incoming_players: selectedValues("incoming_players"),
-                incoming_picks: selectedValues("incoming_picks"),
-            }),
-        })
-        .then(response => response.json())
-        .then(data => {
-            bar.style.width = data.meter + "%";
-            bar.setAttribute("aria-valuenow", data.meter);
-            bar.className = "progress-bar " + (data.would_accept ? "bg-success" : (data.meter < 35 ? "bg-danger" : "bg-warning"));
-            label.textContent = data.label;
-            label.className = "badge " + (data.would_accept ? "bg-success" : (data.meter < 35 ? "bg-danger" : "bg-warning"));
-            if (data.has_assets) {
-                const netSign = data.partner_net >= 0 ? "+" : "";
-                detail.textContent = `They receive: ${data.partner_in} · They send: ${data.partner_out} · Net: ${netSign}${data.partner_net}`;
-            } else {
-                detail.textContent = "They receive: — · They send: — · Net: —";
-            }
-        })
-        .catch(() => {
-            label.textContent = "Preview unavailable";
-        });
-    }
-
-    form.querySelectorAll("input[type=checkbox]").forEach(el => el.addEventListener("change", updateMeter));
-    updateMeter();
-})();
-</script>
 {% elif teams %}
-<p class="text-muted">Select a trade partner to build a deal.</p>
+<div class="glass-liquid p-5 text-center" style="max-width:400px;margin:0 auto;">
+  <div style="font-size:2.5rem;margin-bottom:.75rem;">🤝</div>
+  <p class="text-muted-nba">Select a trade partner above to start building a deal.</p>
+</div>
 {% endif %}
 
 {% if trades %}
-<div class="card mt-5">
-    <div class="card-header">
-        <h2 class="h6 mb-0">Recent Trades</h2>
-    </div>
-    <ul class="list-group list-group-flush">
-        {% for trade in trades|reverse %}
-        <li class="list-group-item small">
-            {{ trade.outgoing_players|length }} player(s), {{ trade.outgoing_picks|length }} pick(s)
-            ↔
-            {{ trade.incoming_players|length }} player(s), {{ trade.incoming_picks|length }} pick(s)
-        </li>
-        {% endfor %}
-    </ul>
+<div class="card-nba mt-5">
+  <div class="card-nba-header"><h2>Recent Trades</h2></div>
+  {% for trade in trades|reverse %}
+  <div class="series-item">
+    <span style="font-size:.85rem;">
+      <span style="color:var(--nba-red);font-weight:600;">{{ trade.outgoing_players|length }} player(s)</span>,
+      <span style="color:var(--text-muted);">{{ trade.outgoing_picks|length }} pick(s)</span>
+      <span style="color:var(--text-muted);margin:0 .5rem;">⇄</span>
+      <span style="color:#7aabff;font-weight:600;">{{ trade.incoming_players|length }} player(s)</span>,
+      <span style="color:var(--text-muted);">{{ trade.incoming_picks|length }} pick(s)</span>
+    </span>
+  </div>
+  {% endfor %}
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById("trade-form");
+  if (!form) return;
+
+  const bar = document.getElementById("trade-meter-bar");
+  const label = document.getElementById("trade-meter-label");
+  const detail = document.getElementById("trade-meter-detail");
+  const partnerId = {{ partner_id }};
+
+  function selectedValues(name) {
+    return Array.from(form.querySelectorAll(`input[name="${name}"]:checked`)).map(el => el.value);
+  }
+
+  function updateMeter() {
+    fetch("{{ url_for('trade_evaluate') }}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        partner_id: partnerId,
+        outgoing_players: selectedValues("outgoing_players"),
+        outgoing_picks:   selectedValues("outgoing_picks"),
+        incoming_players: selectedValues("incoming_players"),
+        incoming_picks:   selectedValues("incoming_picks"),
+      }),
+    })
+    .then(r => r.json())
+    .then(data => {
+      bar.style.width = data.meter + "%";
+      if (data.would_accept) {
+        bar.className = "progress-nba-bar success";
+        label.className = "badge-nba badge-nba-green";
+      } else if (data.meter < 35) {
+        bar.className = "progress-nba-bar danger";
+        label.className = "badge-nba badge-nba-red";
+      } else {
+        bar.className = "progress-nba-bar warning";
+        label.className = "badge-nba badge-nba-gray";
+      }
+      label.textContent = data.label;
+      if (data.has_assets) {
+        const netSign = data.partner_net >= 0 ? "+" : "";
+        detail.textContent = `They receive: ${data.partner_in} · They send: ${data.partner_out} · Net: ${netSign}${data.partner_net}`;
+      } else {
+        detail.textContent = "They receive: — · They send: — · Net: —";
+      }
+    })
+    .catch(() => { label.textContent = "Preview unavailable"; });
+  }
+
+  form.querySelectorAll("input[type=checkbox]").forEach(el => el.addEventListener("change", updateMeter));
+  updateMeter();
+})();
+
+/* Check-list highlight on check */
+document.querySelectorAll('.check-list-item input[type="checkbox"]').forEach(cb => {
+  cb.addEventListener('change', () => {
+    cb.closest('.check-list-item').classList.toggle('checked', cb.checked);
+  });
+});
+
+document.querySelectorAll('[data-ovr]').forEach(el => {
+  const v = parseInt(el.dataset.ovr, 10);
+  el.classList.add('ovr-chip');
+  if (v >= 85) el.classList.add('ovr-elite');
+  else if (v >= 78) el.classList.add('ovr-great');
+  else if (v >= 70) el.classList.add('ovr-good');
+  else el.classList.add('ovr-avg');
+});
+</script>
 {% endblock %}
