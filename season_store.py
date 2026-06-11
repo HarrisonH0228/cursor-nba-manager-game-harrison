@@ -1,6 +1,11 @@
 import json
+import logging
 import os
+import shutil
+import tempfile
 import uuid
+
+logger = logging.getLogger(__name__)
 
 SEASONS_DIR = os.path.join(os.path.dirname(__file__), "data", "seasons")
 
@@ -33,18 +38,27 @@ def _season_path(season_id):
     return os.path.join(SEASONS_DIR, f"{season_id}.json")
 
 
+def _backup_path(season_id):
+    return _season_path(season_id) + ".bak"
+
+
+def _corrupt_path(season_id):
+    return _season_path(season_id) + ".corrupt"
+
+
 def create_season_id():
     return str(uuid.uuid4())
 
 
-def load_season(season_id):
-    path = _season_path(season_id)
-    if not os.path.exists(path):
-        return None
+def _try_load_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle), None
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, exc
 
-    with open(path, encoding="utf-8") as handle:
-        data = json.load(handle)
 
+def _prepare_season_data(data):
     for key, value in DEFAULT_SEASON.items():
         data.setdefault(key, value if not isinstance(value, dict) else dict(value))
 
@@ -54,16 +68,69 @@ def load_season(season_id):
     return data
 
 
+def load_season(season_id):
+    """Load season data. Returns (data, recovery_status).
+
+    recovery_status is None on success, "restored" when recovered from .bak,
+    or "corrupt" when the save could not be loaded.
+    """
+    path = _season_path(season_id)
+    if not os.path.exists(path):
+        return None, None
+
+    data, err = _try_load_json(path)
+    if data is not None:
+        return _prepare_season_data(data), None
+
+    logger.warning("Corrupt season JSON for %s: %s", season_id, err)
+
+    backup = _backup_path(season_id)
+    backup_data, backup_err = _try_load_json(backup)
+    if backup_data is not None:
+        logger.warning("Restoring season %s from backup", season_id)
+        try:
+            shutil.copy2(backup, path)
+        except OSError:
+            logger.warning("Could not overwrite corrupt season file for %s", season_id)
+        return _prepare_season_data(backup_data), "restored"
+
+    try:
+        os.replace(path, _corrupt_path(season_id))
+    except OSError:
+        logger.warning("Could not move corrupt season file for %s", season_id)
+
+    logger.warning("Season %s unrecoverable; moved to .corrupt", season_id)
+    return None, "corrupt"
+
+
 def save_season(season_id, data):
     os.makedirs(SEASONS_DIR, exist_ok=True)
     path = _season_path(season_id)
-    temp_path = path + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=2)
-    os.replace(temp_path, path)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=SEASONS_DIR, suffix=".tmp", prefix=f"{season_id}-"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+
+        with open(temp_path, encoding="utf-8") as handle:
+            json.loads(handle.read())
+
+        if os.path.exists(path):
+            try:
+                shutil.copy2(path, _backup_path(season_id))
+            except OSError:
+                logger.warning("Could not write season backup for %s", season_id)
+
+        os.replace(temp_path, path)
+        temp_path = None
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 def delete_season(season_id):
-    path = _season_path(season_id)
-    if os.path.exists(path):
-        os.remove(path)
+    for path in (_season_path(season_id), _backup_path(season_id), _corrupt_path(season_id)):
+        if os.path.exists(path):
+            os.remove(path)

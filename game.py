@@ -9,6 +9,7 @@ SESSION_GAME_STARTED = "game_started"
 SESSION_TEAM_ID = "team_id"
 SESSION_TEAM_NAME = "team_name"
 SESSION_SEASON_ID = "season_id"
+SESSION_SEASON_RECOVERY = "season_recovery"
 
 
 def get_game(current_session=None):
@@ -34,10 +35,25 @@ def set_season_id(season_id, current_session=None):
 
 
 def load_session_season(current_session=None):
+    current_session = current_session if current_session is not None else session
     season_id = get_season_id(current_session)
     if not season_id:
         return None, None
-    return season_id, season_store.load_season(season_id)
+
+    season_data, recovery_status = season_store.load_season(season_id)
+    if recovery_status == "restored":
+        current_session[SESSION_SEASON_RECOVERY] = "restored"
+    elif season_data is None:
+        current_session.pop(SESSION_SEASON_ID, None)
+        current_session[SESSION_SEASON_RECOVERY] = "corrupt"
+        return None, None
+
+    return season_id, season_data
+
+
+def consume_season_recovery_notice(current_session=None):
+    current_session = current_session if current_session is not None else session
+    return current_session.pop(SESSION_SEASON_RECOVERY, None)
 
 
 def save_session_season(season_id, season_data, current_session=None):

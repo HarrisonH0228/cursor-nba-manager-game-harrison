@@ -7,6 +7,7 @@ import cache
 from fetcher import fetch_teams, refresh_cache
 from game import (
     clear_game,
+    consume_season_recovery_notice,
     get_game,
     load_session_season,
     require_game,
@@ -259,6 +260,11 @@ def _known_team_ids(all_players):
 @app.context_processor
 def inject_game():
     _, season_data = load_session_season()
+    recovery = consume_season_recovery_notice()
+    if recovery == "restored":
+        flash("Season save was corrupted; restored from backup.", "warning")
+    elif recovery == "corrupt":
+        flash("Season save was corrupted; please start a new season.", "error")
     game = get_game()
     lookup = league_lookup(season_data) if season_data else None
     headlines = (

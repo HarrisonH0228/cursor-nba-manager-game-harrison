@@ -5,6 +5,7 @@ import unittest
 
 import cache
 from attributes import (
+    PLAYER_MAX_MINUTES,
     allocate_minutes,
     apply_attributes,
     derive_attributes,
@@ -73,7 +74,34 @@ class AttributeTests(unittest.TestCase):
         team_id = self.players[0]["team_id"]
         roster = [player for player in self.players if player.get("team_id") == team_id]
         minutes = allocate_minutes(roster)
-        self.assertEqual(sum(minutes.values()), 240)
+        self.assertLessEqual(sum(minutes.values()), 240)
+
+    def test_no_player_exceeds_48_minutes(self):
+        team_id = self.players[0]["team_id"]
+        roster = [player for player in self.players if player.get("team_id") == team_id]
+        rng = random.Random(42)
+        for _ in range(100):
+            minutes = allocate_minutes(roster, rng=rng)
+            self.assertLessEqual(max(minutes.values()), PLAYER_MAX_MINUTES)
+
+    def test_injured_rotation_caps_at_48(self):
+        team_id = self.players[0]["team_id"]
+        roster = [player for player in self.players if player.get("team_id") == team_id]
+        opponent = next(
+            player["team_id"]
+            for player in self.players
+            if player.get("team_id") != team_id
+        )
+        away_roster = [player for player in self.players if player.get("team_id") == opponent]
+        exclude_ids = {player["id"] for player in roster[:5]}
+        result = simulate_game_with_box_score(
+            roster,
+            away_roster,
+            rng=random.Random(17),
+            home_exclude_ids=exclude_ids,
+        )
+        for line in result["home_box"]:
+            self.assertLessEqual(line["min"], PLAYER_MAX_MINUTES)
 
     def test_rookie_attributes_lower_than_stars(self):
         rng = random.Random(11)

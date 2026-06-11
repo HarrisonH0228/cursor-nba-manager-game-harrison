@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import tempfile
 
 CACHE_PATH = os.path.join(os.path.dirname(__file__), "data", "cache.json")
 
@@ -22,10 +24,28 @@ def load_cache():
 
 def save_cache(data):
     os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-    temp_path = CACHE_PATH + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.replace(temp_path, CACHE_PATH)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=os.path.dirname(CACHE_PATH), suffix=".tmp", prefix="cache-"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+
+        with open(temp_path, encoding="utf-8") as handle:
+            json.loads(handle.read())
+
+        if os.path.exists(CACHE_PATH):
+            try:
+                shutil.copy2(CACHE_PATH, CACHE_PATH + ".bak")
+            except OSError:
+                pass
+
+        os.replace(temp_path, CACHE_PATH)
+        temp_path = None
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 def get_players():

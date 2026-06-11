@@ -73,7 +73,7 @@ class AdminValidationTests(unittest.TestCase):
         self._start_game_and_season()
         with self.client.session_transaction() as sess:
             season_id = sess.get("season_id")
-        season_data = season_store.load_season(season_id)
+        season_data, _ = season_store.load_season(season_id)
         player_count_before = len(season_data.get("players", {}))
 
         response = self.client.post(
@@ -84,5 +84,5 @@ class AdminValidationTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 302)
 
-        season_data = season_store.load_season(season_id)
+        season_data, _ = season_store.load_season(season_id)
         self.assertEqual(len(season_data.get("players", {})), player_count_before + 1)

@@ -13,7 +13,9 @@ from ratings import (
 ATTRIBUTE_KEYS = ("scoring", "playmaking", "rebounding", "defense", "efficiency", "stamina")
 MIN_ATTR = 25
 MAX_ATTR = 99
-TEAM_MINUTES = 240
+GAME_MINUTES = 48
+TEAM_MINUTES = GAME_MINUTES * 5
+PLAYER_MAX_MINUTES = GAME_MINUTES
 ROTATION_SIZE = 8
 MIN_STARTERS = 5
 GAME_NOISE_STDEV = 0.18
@@ -811,6 +813,33 @@ def _normalize_minutes_to_240(minutes, rotation):
     return minutes
 
 
+def _cap_and_redistribute_minutes(minutes, rotation, team_total=TEAM_MINUTES):
+    if not minutes or not rotation:
+        return minutes
+    ids = [player["id"] for player in rotation if minutes.get(player["id"], 0) > 0]
+    if not ids:
+        return minutes
+
+    for pid in ids:
+        minutes[pid] = min(minutes[pid], PLAYER_MAX_MINUTES)
+
+    current = sum(minutes[pid] for pid in ids)
+    while current < team_total:
+        eligible = [pid for pid in ids if minutes[pid] < PLAYER_MAX_MINUTES]
+        if not eligible:
+            break
+        deficit = team_total - current
+        weights = [max(minutes[pid], 1) for pid in eligible]
+        shares = _largest_remainder(deficit, weights)
+        if not any(shares):
+            break
+        for pid, share in zip(eligible, shares):
+            minutes[pid] = min(PLAYER_MAX_MINUTES, minutes[pid] + share)
+        current = sum(minutes[pid] for pid in ids)
+
+    return minutes
+
+
 def allocate_minutes(roster, rng=None, exclude_player_ids=None):
     rng = rng or random.Random()
     exclude_player_ids = exclude_player_ids or set()
@@ -844,6 +873,7 @@ def allocate_minutes(roster, rng=None, exclude_player_ids=None):
         minutes[player["id"]] = int(raw)
 
     minutes = _normalize_minutes_to_240(minutes, rotation)
+    minutes = _cap_and_redistribute_minutes(minutes, rotation)
 
     for player in roster:
         if player["id"] not in minutes:
