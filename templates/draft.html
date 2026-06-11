@@ -68,6 +68,8 @@
                                        {% if loop.first %}checked{% endif %}>
                                 <span class="form-check-label fw-semibold" for="prospect-{{ loop.index0 }}">
                                     {{ prospect.name }}
+                                    {% if prospect.is_custom %}<span class="badge text-bg-warning ms-1">Custom</span>{% endif %}
+                                {% if prospect.is_overclocked %}<span class="badge text-bg-danger ms-1">OC</span>{% endif %}
                                 </span>
                             </div>
                             <p class="small text-muted mb-0 mt-2">

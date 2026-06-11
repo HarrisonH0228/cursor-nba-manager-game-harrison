@@ -15,6 +15,11 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto align-items-lg-center">
+                    {% if admin_enabled %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_panel') }}">Admin</a>
+                    </li>
+                    {% endif %}
                     {% if game %}
                     <li class="nav-item">
                         <span class="navbar-text text-light me-lg-3">{{ game.team_name }}</span>

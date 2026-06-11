@@ -1,6 +1,4 @@
-import json
 import random
-import time
 
 from attributes import apply_attributes, apply_season_aging, backfill_career_metadata, ensure_positions, init_career_profile, needs_attributes
 from ratings import compute_team_overall
@@ -52,27 +50,6 @@ PLAYOFF_TEAMS_PER_CONFERENCE = 8
 
 # Approximate NBA lottery odds (per 1000) for the 14 non-playoff teams, worst record first.
 LOTTERY_ODDS = [140, 140, 134, 122, 109, 94, 79, 67, 56, 46, 37, 29, 22, 16]
-
-DEBUG_LOG_PATH = "/Users/harrisonhoggatt/Documents/GitHub/nba-manager-game/.cursor/debug-7efc9a.log"
-
-
-def _debug_log(hypothesis_id, location, message, data=None, run_id="pre-fix"):
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "7efc9a",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
-    except OSError:
-        pass
-    # #endregion
 
 
 def _schedule_games_per_team(matchups, team_ids):
@@ -238,17 +215,6 @@ def generate_schedule(team_ids, rng=None):
 
     rng.shuffle(matchups)
     scheduled = assign_days(matchups, rng)
-    gp_counts = _schedule_games_per_team(scheduled, team_ids)
-    min_gp = min(gp_counts.values())
-    max_gp = max(gp_counts.values())
-    # #region agent log
-    _debug_log(
-        "A",
-        "season.py:generate_schedule",
-        "schedule gp counts",
-        {"min_gp": min_gp, "max_gp": max_gp, "total_games": len(scheduled), "target": GAMES_PER_TEAM},
-    )
-    # #endregion
 
     games = []
     for game_id, game in enumerate(scheduled, start=1):
@@ -331,7 +297,7 @@ def _standings_worst_first(season, lookup=None):
     lookup = lookup or league_lookup(season)
     rows = standings_table(season)
     rows.sort(key=_standings_row_sort_key(season, lookup))
-    return list(reversed(rows))
+    return rows
 
 
 def playoff_team_ids(season):
@@ -345,9 +311,9 @@ def playoff_team_ids(season):
 def lottery_team_rows(season, lookup=None):
     lookup = lookup or league_lookup(season)
     playoff_ids = playoff_team_ids(season)
-    lottery_rows = [row for row in _standings_worst_first(season, lookup) if row["team_id"] not in playoff_ids]
+    lottery_rows = [row for row in standings_table(season) if row["team_id"] not in playoff_ids]
     lottery_rows.sort(key=_standings_row_sort_key(season, lookup))
-    return list(reversed(lottery_rows))
+    return lottery_rows
 
 
 def _lottery_weights(team_count):
@@ -683,26 +649,8 @@ def sim_rest_of_season(season, lookup, rng=None):
         _play_game(season, game, lookup, rng)
         games_played += 1
 
-    gp_values = [record.get("gp", 0) for record in season.get("standings", {}).values()]
     all_played = all_schedule_games_played(season)
     complete = regular_season_complete(season)
-    # #region agent log
-    _debug_log(
-        "ABC",
-        "season.py:sim_rest_of_season",
-        "post sim state",
-        {
-            "games_played": games_played,
-            "all_schedule_played": all_played,
-            "regular_complete": complete,
-            "min_gp": min(gp_values) if gp_values else None,
-            "max_gp": max(gp_values) if gp_values else None,
-            "current_day_before": season.get("current_day"),
-            "max_day": season.get("max_day"),
-            "phase_before": season.get("phase"),
-        },
-    )
-    # #endregion
 
     if complete or all_played:
         season["phase"] = "regular_complete"
@@ -710,18 +658,6 @@ def sim_rest_of_season(season, lookup, rng=None):
     else:
         season["current_day"] = season.get("max_day", 1) + 1
 
-    # #region agent log
-    _debug_log(
-        "C",
-        "season.py:sim_rest_of_season",
-        "final season state",
-        {
-            "phase": season.get("phase"),
-            "current_day": season.get("current_day"),
-            "max_day": season.get("max_day"),
-        },
-    )
-    # #endregion
     return games_played
 
 

@@ -60,7 +60,16 @@ from trade import (
     trade_window_message,
     validate_trade,
 )
-from attributes import apply_attributes, ensure_positions, init_career_profiles, needs_attributes, positions_label, scouting_upside_tier
+from attributes import (
+    ATTRIBUTE_KEYS,
+    VALID_POSITIONS,
+    apply_attributes,
+    ensure_positions,
+    init_career_profiles,
+    needs_attributes,
+    positions_label,
+    scouting_upside_tier,
+)
 from ratings import (
     STAT_COLUMNS,
     STAT_LABELS,
@@ -72,11 +81,13 @@ from ratings import (
     needs_ratings,
 )
 from scheduler import start_scheduler
+from custom_players import add_custom_player, delete_custom_player, list_custom_players
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
+ADMIN_ENABLED = os.getenv("ADMIN_ENABLED", "true").lower() == "true"
 
 SORT_COLUMNS = {"name", "team", "overall", "ppg", "rpg", "apg", "spg", "bpg"}
 ROSTER_SORT_COLUMNS = {"name", "overall", "age", "gp", "position", "ppg", "rpg", "apg", "spg", "bpg"}
@@ -233,6 +244,7 @@ def inject_game():
         "active_season": season_data,
         "positions_label": positions_label,
         "max_roster": MAX_ROSTER,
+        "admin_enabled": ADMIN_ENABLED,
     }
 
 
@@ -1128,6 +1140,64 @@ def season_advance():
         message = f"{message} Retired: {names}."
     flash(message)
     return redirect(url_for("season_hub"))
+
+
+def _admin_guard():
+    if not ADMIN_ENABLED:
+        flash("Admin panel is disabled.")
+        return redirect(url_for("index"))
+    return None
+
+
+@app.route("/admin")
+def admin_panel():
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    return render_template(
+        "admin.html",
+        page_title="Admin",
+        custom_players=list_custom_players(),
+        attribute_keys=ATTRIBUTE_KEYS,
+        valid_positions=VALID_POSITIONS,
+    )
+
+
+@app.route("/admin/players", methods=["POST"])
+def admin_add_player():
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    try:
+        add_custom_player(
+            name=request.form.get("name", ""),
+            age=request.form.get("age", 19),
+            positions=request.form.getlist("positions"),
+            attributes={key: request.form.get(key) for key in ATTRIBUTE_KEYS},
+            potential=request.form.get("potential") or None,
+            overclock=request.form.get("overclock") == "on",
+        )
+    except ValueError as exc:
+        flash(str(exc))
+        return redirect(url_for("admin_panel"))
+
+    flash("Custom player added. They will appear in the next draft.")
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/players/<custom_id>/delete", methods=["POST"])
+def admin_delete_player(custom_id):
+    blocked = _admin_guard()
+    if blocked is not None:
+        return blocked
+
+    if delete_custom_player(custom_id):
+        flash("Custom player removed.")
+    else:
+        flash("Custom player not found.")
+    return redirect(url_for("admin_panel"))
 
 
 @app.route("/refresh")

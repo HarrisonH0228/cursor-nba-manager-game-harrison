@@ -3,6 +3,11 @@
 import random
 
 from attributes import generate_rookie_profile, init_rookie_career_profile, season_averages_from_attributes
+from custom_players import (
+    available_custom_templates,
+    build_prospect_from_template,
+    mark_custom_player_drafted,
+)
 from roster import can_add_player, ensure_draft_roster_room, MAX_ROSTER
 from season import (
     allocate_player_id,
@@ -68,8 +73,18 @@ def generate_prospect_options(season, round_num, pick_in_round, team_count, rng=
     options = []
     for _ in range(PROSPECT_OPTIONS):
         options.append(generate_prospect(season, round_num, pick_in_round, team_count, rng))
+    _inject_custom_prospect(season, options, rng)
     options.sort(key=lambda prospect: prospect["overall"], reverse=True)
     return options
+
+
+def _inject_custom_prospect(season, options, rng):
+    available = available_custom_templates(season)
+    if not available:
+        return
+    template = rng.choice(available)
+    prospect = build_prospect_from_template(season, template, rng)
+    options[rng.randrange(len(options))] = prospect
 
 
 def start_draft(season, lookup=None, rng=None):
@@ -87,6 +102,7 @@ def start_draft(season, lookup=None, rng=None):
         "prospect_options": [],
         "lottery_order": lottery_result["lottery_order"],
         "playoff_order": lottery_result["playoff_order"],
+        "drafted_custom_ids": [],
     }
     return season["draft_state"]
 
@@ -156,6 +172,8 @@ def make_pick(season, team_id, prospect=None, rng=None, auto_trim=False):
 
     _consume_pick_asset(season, team_id, round_num)
     _assign_rookie(season, prospect, team_id)
+    if prospect.get("custom_id"):
+        mark_custom_player_drafted(season, prospect["custom_id"])
 
     state["recent_picks"].insert(
         0,

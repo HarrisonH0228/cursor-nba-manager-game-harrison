@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div>
+        <h1 class="mb-1">Admin</h1>
+        <p class="text-muted mb-0">
+            Create custom draft prospects with hand-picked attributes. Enable overclock to exceed normal draft limits (up to 999).
+        </p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="h6 mb-0">Add custom player</h2>
+            </div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('admin_add_player') }}">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required maxlength="80">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="age" class="form-label">Age</label>
+                        <input type="number" class="form-control" id="age" name="age" value="19" min="18" max="30">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Positions</label>
+                        <div class="d-flex flex-wrap gap-3">
+                            {% for pos in valid_positions %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="positions" value="{{ pos }}"
+                                       id="pos-{{ pos }}" {% if pos == 'SF' %}checked{% endif %}>
+                                <label class="form-check-label" for="pos-{{ pos }}">{{ pos }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="overclock" id="overclock">
+                        <label class="form-check-label" for="overclock">
+                            Overclock — allow attributes and potential above normal draft caps (max 999)
+                        </label>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="potential" class="form-label">Potential (optional)</label>
+                        <input type="number" class="form-control" id="potential" name="potential"
+                               min="40" max="999" placeholder="Auto from overall">
+                    </div>
+
+                    <p class="fw-semibold mb-2">Attributes</p>
+                    <p class="small text-muted">Draft range is 25–99. Overclock allows 1–999.</p>
+                    {% for key in attribute_keys %}
+                    <div class="mb-3">
+                        <label for="{{ key }}" class="form-label text-capitalize">{{ key }}</label>
+                        <div class="input-group">
+                            <input type="range" class="form-range flex-grow-1" id="{{ key }}-range"
+                                   min="25" max="999" value="70"
+                                   oninput="syncAttr('{{ key }}', this.value)">
+                            <input type="number" class="form-control" style="max-width: 5rem"
+                                   id="{{ key }}" name="{{ key }}" min="1" max="999" value="70"
+                                   oninput="syncAttr('{{ key }}', this.value, true)">
+                        </div>
+                    </div>
+                    {% endfor %}
+
+                    <button type="submit" class="btn btn-primary">Add to draft pool</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h2 class="h6 mb-0">Draft pool</h2>
+                <span class="badge text-bg-secondary">{{ custom_players|length }} players</span>
+            </div>
+            {% if custom_players %}
+            <div class="table-responsive">
+                <table class="table table-striped align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Pos</th>
+                            <th>Age</th>
+                            <th>OVR</th>
+                            <th>Stats</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for player in custom_players %}
+                        <tr>
+                            <td class="fw-semibold">
+                                {{ player.name }}
+                                {% if player.is_overclocked %}<span class="badge text-bg-warning ms-1">OC</span>{% endif %}
+                            </td>
+                            <td>{{ positions_label(player.positions) }}</td>
+                            <td>{{ player.age }}</td>
+                            <td>{{ player.overall }}</td>
+                            <td class="small">
+                                {{ player.ppg }} PPG · {{ player.rpg }} RPG · {{ player.apg }} APG
+                            </td>
+                            <td class="text-end">
+                                <form method="post" action="{{ url_for('admin_delete_player', custom_id=player.custom_id) }}"
+                                      onsubmit="return confirm('Remove {{ player.name }} from the draft pool?');">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card-body text-muted">
+                No custom players yet. Add one to inject them into draft boards.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function syncAttr(key, value, fromNumber) {
+    const num = Math.max(1, Math.min(999, parseInt(value, 10) || 1));
+    document.getElementById(key).value = num;
+    const range = document.getElementById(key + '-range');
+    if (range) {
+        range.value = num;
+    }
+}
+</script>
+{% endblock %}

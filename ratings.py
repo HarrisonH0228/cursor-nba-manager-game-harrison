@@ -118,7 +118,10 @@ def compute_intrinsic_overall(player):
     if weight_total <= 0:
         return player.get("overall") or 50
     raw = weighted_sum / weight_total
-    return round(max(MIN_INTRINSIC_OVERALL, min(MAX_INTRINSIC_OVERALL, raw)), 1)
+    from attributes import ADMIN_ATTR_MAX
+
+    max_ovr = ADMIN_ATTR_MAX if player.get("is_overclocked") else MAX_INTRINSIC_OVERALL
+    return round(max(MIN_INTRINSIC_OVERALL, min(max_ovr, raw)), 1)
 
 
 def needs_ratings(players):

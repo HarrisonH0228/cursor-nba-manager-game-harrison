@@ -13,6 +13,8 @@ from ratings import (
 ATTRIBUTE_KEYS = ("scoring", "playmaking", "rebounding", "defense", "efficiency", "stamina")
 MIN_ATTR = 25
 MAX_ATTR = 99
+ADMIN_ATTR_MAX = 999
+ADMIN_POTENTIAL_MAX = 999
 TEAM_MINUTES = 240
 ROTATION_SIZE = 8
 GAME_NOISE_STDEV = 0.25
@@ -67,6 +69,17 @@ ATTR_BIAS_MAX = 1.10
 
 
 def _clamp(value, low=MIN_ATTR, high=MAX_ATTR):
+    return max(low, min(high, round(value)))
+
+
+def _attr_limits(player=None):
+    if player and player.get("is_overclocked"):
+        return MIN_ATTR, ADMIN_ATTR_MAX
+    return MIN_ATTR, MAX_ATTR
+
+
+def _clamp_attr(value, player=None):
+    low, high = _attr_limits(player)
     return max(low, min(high, round(value)))
 
 
@@ -333,11 +346,12 @@ def season_averages_from_attributes(attributes, rng=None, player=None):
 def season_averages_from_attributes_deterministic(attributes, player=None):
     multipliers = position_stat_multipliers(ensure_positions(player) if player else [])
     stat_mods = player.get("stat_modifiers", {}) if player else {}
+    skip_caps = bool(player and player.get("is_overclocked"))
     stats = {}
     for stat, (attr_key, scale) in STAT_FROM_ATTR.items():
         value = attributes[attr_key] * scale * multipliers.get(stat, 1.0) * stat_mods.get(stat, 1.0)
         cap = STAT_DISPLAY_CAPS.get(stat)
-        if cap is not None:
+        if cap is not None and not skip_caps:
             value = min(value, cap)
         stats[stat] = round(value, 1)
     return stats
@@ -510,6 +524,9 @@ def init_career_profiles(players, rng=None):
 def effective_attributes(player):
     init_career_profile(player)
     base = player.get("base_attributes") or player.get("attributes") or derive_attributes(player)
+    if player.get("is_overclocked"):
+        return {key: _clamp_attr(base.get(key, MIN_ATTR), player) for key in ATTRIBUTE_KEYS}
+
     age = player.get("age", 25)
     peak_age = player.get("peak_age", DEFAULT_PEAK_AGE)
     multiplier = age_multiplier(age, peak_age)
@@ -518,7 +535,7 @@ def effective_attributes(player):
     effective = {}
     for key in ATTRIBUTE_KEYS:
         attr_multiplier = stamina_multiplier if key == "stamina" else multiplier
-        effective[key] = _clamp(base.get(key, MIN_ATTR) * attr_multiplier)
+        effective[key] = _clamp_attr(base.get(key, MIN_ATTR) * attr_multiplier, player)
     return effective
 
 
@@ -592,6 +609,46 @@ def init_rookie_career_profile(player, effective_attrs, rng=None):
         multiplier,
         stamina_multiplier,
     )
+    refresh_player_from_attributes(player, effective_attributes(player))
+    player["overall"] = compute_intrinsic_overall(player)
+    return player
+
+
+def init_custom_rookie_career_profile(player, effective_attrs, rng=None, potential=None, overclocked=False):
+    rng = rng or random.Random()
+    ensure_positions(player)
+    player["peak_age"] = rng.randint(PEAK_AGE_MIN, PEAK_AGE_MAX)
+    player["retirement_age"] = rng.randint(RETIRE_AGE_MIN, RETIRE_AGE_MAX)
+    player["season_gp"] = 0
+    if overclocked:
+        player["is_overclocked"] = True
+    potential_high = ADMIN_POTENTIAL_MAX if overclocked else POTENTIAL_MAX
+    if potential is not None:
+        player["potential"] = max(POTENTIAL_MIN, min(potential_high, round(potential)))
+    else:
+        _assign_potential(player, rng)
+        if overclocked and player.get("potential", 0) > POTENTIAL_MAX:
+            player["potential"] = min(player["potential"], ADMIN_POTENTIAL_MAX)
+    if overclocked:
+        player["peak_attributes"] = {
+            key: _clamp_attr(effective_attrs.get(key, MIN_ATTR) + rng.randint(4, 10), player)
+            for key in ATTRIBUTE_KEYS
+        }
+        player["base_attributes"] = {
+            key: _clamp_attr(effective_attrs.get(key, MIN_ATTR), player)
+            for key in ATTRIBUTE_KEYS
+        }
+    else:
+        player["peak_attributes"] = {
+            key: _clamp(effective_attrs.get(key, MIN_ATTR) + rng.randint(4, 10))
+            for key in ATTRIBUTE_KEYS
+        }
+        age = player.get("age", 20)
+        multiplier = age_multiplier(age, player["peak_age"])
+        stamina_multiplier = stamina_age_multiplier(age, player["peak_age"])
+        scaled = _scale_base_attributes(effective_attrs, multiplier, stamina_multiplier)
+        player["base_attributes"] = {key: _clamp(scaled.get(key, MIN_ATTR)) for key in ATTRIBUTE_KEYS}
+    _assign_stat_modifiers(player, rng)
     refresh_player_from_attributes(player, effective_attributes(player))
     player["overall"] = compute_intrinsic_overall(player)
     return player
