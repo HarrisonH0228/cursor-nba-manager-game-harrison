@@ -14,6 +14,15 @@ MAX_PLAYER_PCT = 0.35
 TRADE_SALARY_TOLERANCE_M = 5.0
 
 ROOKIE_SALARY_BY_ROUND = {1: 8.0, 2: 3.5, 3: 1.5}
+CONTRACT_WARNING_YEARS = 1
+
+CHAMPIONSHIP_BONUS_BY_OVR = (
+    (90, 2.0),
+    (85, 1.5),
+    (78, 1.0),
+    (70, 0.6),
+    (0, 0.3),
+)
 
 
 def _round_salary(value):
@@ -74,6 +83,35 @@ def compute_asking_salary(player):
     return _round_salary(ask)
 
 
+def roll_initial_contract_years(player, rng=None):
+    rng = rng or random.Random()
+    overall = player.get("overall") or 50
+    age = player.get("age") or 25
+    if overall >= 90:
+        choices, weights = [3, 4], [1, 3]
+    elif overall >= 85:
+        choices, weights = [2, 3, 4], [1, 2, 3]
+    elif overall >= 78:
+        choices, weights = [2, 3, 4], [2, 3, 2]
+    elif overall >= 68:
+        choices, weights = [1, 2, 3], [2, 3, 2]
+    else:
+        choices, weights = [1, 2], [3, 2]
+    if age <= 23:
+        weights = [w + (1 if y >= 3 else 0) for w, y in zip(weights, choices)]
+    elif age >= 34:
+        weights = [w + (1 if y <= 2 else 0) for w, y in zip(weights, choices)]
+    return int(rng.choices(choices, weights=weights, k=1)[0])
+
+
+def championship_bonus_amount(player):
+    overall = player.get("overall") or 50
+    for threshold, amount in CHAMPIONSHIP_BONUS_BY_OVR:
+        if overall >= threshold:
+            return amount
+    return 0.3
+
+
 def assign_player_contract(player, years=None, salary=None):
     """Seed or refresh contract fields on a player dict."""
     if salary is None:
@@ -104,7 +142,11 @@ def team_payroll(season, team_id, lookup=None):
 
 
 def team_finances(season, team_id, lookup=None):
+    lookup = lookup or league_lookup(season)
     payroll = team_payroll(season, team_id, lookup)
+    bonus_paid = float(
+        season.get("team_finances", {}).get(str(team_id), {}).get("bonus_paid") or 0
+    )
     cap_space = round(SALARY_CAP_M - payroll, 1)
     min_floor = round(SALARY_CAP_M * MIN_TEAM_SALARY_PCT, 1)
     return {
@@ -114,6 +156,7 @@ def team_finances(season, team_id, lookup=None):
         "luxury_tax_line": LUXURY_TAX_LINE_M,
         "min_team_salary": min_floor,
         "below_min_warning": payroll < min_floor,
+        "bonus_paid": round(bonus_paid, 1),
     }
 
 
@@ -130,8 +173,14 @@ def ensure_contract_fields(season, rng=None):
     rng = rng or random.Random()
     lookup = league_lookup(season)
     for player in season.get("players", {}).values():
-        if player.get("salary") is None:
-            assign_player_contract(player, years=rng.randint(1, 3))
+        needs_contract = (
+            player.get("salary") is None
+            or player.get("contract_years") is None
+            or int(player.get("contract_years") or 0) <= 0
+        )
+        if player.get("team_id") and needs_contract:
+            years = roll_initial_contract_years(player, rng)
+            assign_player_contract(player, years=years)
         if not player.get("team_id") and player.get("asking_salary") is None:
             player["asking_salary"] = compute_asking_salary(player)
     _normalize_team_payrolls(season, lookup)
@@ -158,11 +207,151 @@ def assign_initial_contracts(season, rng=None):
     lookup = league_lookup(season)
     for player in season.get("players", {}).values():
         if player.get("team_id"):
-            assign_player_contract(player, years=rng.randint(1, 4))
+            years = roll_initial_contract_years(player, rng)
+            salary = market_salary(player)
+            overall = player.get("overall") or 50
+            if overall >= 85 and years >= 3:
+                salary = _round_salary(salary * rng.uniform(1.03, 1.08))
+            assign_player_contract(player, years=years, salary=salary)
         else:
             player["asking_salary"] = compute_asking_salary(player)
     _normalize_team_payrolls(season, lookup)
     refresh_all_team_finances(season, lookup)
+
+
+def compute_extension_ask(player):
+    current = float(player.get("salary") or market_salary(player))
+    market = market_salary(player)
+    overall = player.get("overall") or 50
+    base = max(current * 1.08, market)
+    if overall >= 85:
+        base = max(base, market * 1.12)
+    elif overall >= 75:
+        base = max(base, market * 1.06)
+    return _round_salary(base)
+
+
+def expiring_contract_report(season, user_team_id, lookup=None):
+    lookup = lookup or league_lookup(season)
+    if not user_team_id:
+        return []
+    report = []
+    for player in roster_players(season, int(user_team_id), lookup):
+        years = int(player.get("contract_years") or 0)
+        if years > CONTRACT_WARNING_YEARS:
+            continue
+        report.append(
+            {
+                "player_id": player["id"],
+                "player_name": player.get("name", str(player["id"])),
+                "salary": player.get("salary"),
+                "contract_years": years,
+                "extension_ask": compute_extension_ask(player),
+            }
+        )
+    report.sort(key=lambda item: item["contract_years"])
+    return report
+
+
+def evaluate_extension(player, salary, years, season, team_id):
+    salary = _round_salary(float(salary))
+    years = int(years)
+    ask = compute_extension_ask(player)
+    current = float(player.get("salary") or 0)
+    win_pct = _team_win_pct(season, team_id)
+    score = 15.0
+    if salary >= ask:
+        score += 40
+    elif salary >= ask * 0.95:
+        score += 25
+    elif salary >= current * 1.05:
+        score += 15
+    else:
+        score -= 20
+    if years >= 3:
+        score += 10
+    elif years == 2:
+        score += 5
+    if win_pct >= 0.5:
+        score += 8
+    threshold = 45 if (player.get("overall") or 50) >= 78 else 35
+    if score >= threshold:
+        return True, (
+            f"{player.get('name', 'Player')} signed an extension: "
+            f"${salary}M/yr × {years} years."
+        )
+    return False, (
+        f"{player.get('name', 'Player')} wants at least ${ask}M/yr to extend."
+    )
+
+
+def propose_extension(season, team_id, player_id, salary, years):
+    from roster import reconcile_team_roster
+    from season import can_trade
+
+    if not can_trade(season):
+        return False, "Extensions are not available in this phase.", False
+
+    lookup = league_lookup(season)
+    player_id = int(player_id)
+    player = lookup.get(player_id)
+    if not player:
+        return False, "Player not found.", False
+    roster_ids = season.get("rosters", {}).get(str(team_id), [])
+    if player_id not in roster_ids:
+        return False, "Player is not on your roster.", False
+
+    current_salary = float(player.get("salary") or 0)
+    delta = _round_salary(float(salary)) - current_salary
+    finances = team_finances(season, team_id, lookup)
+    if delta > finances["cap_space"]:
+        return False, f"Extension exceeds cap space (${finances['cap_space']}M available).", False
+
+    ok, message = validate_offer_terms(player, salary, years, team_id, season, lookup)
+    if not ok:
+        return False, message, False
+
+    accepted, result_message = evaluate_extension(player, salary, years, season, team_id)
+    if accepted:
+        player["previous_salary"] = player.get("salary")
+        player["salary"] = _round_salary(float(salary))
+        player["contract_years"] = int(years)
+        refresh_all_team_finances(season, lookup)
+        reconcile_team_roster(season, team_id)
+        return True, result_message, True
+    return False, result_message, False
+
+
+def apply_championship_bonuses(season, team_id, lookup=None):
+    lookup = lookup or league_lookup(season)
+    total = 0.0
+    for player in roster_players(season, int(team_id), lookup):
+        bonus = championship_bonus_amount(player)
+        player["championship_bonus"] = bonus
+        total += bonus
+    finances = season.setdefault("team_finances", {}).setdefault(str(team_id), {})
+    finances["bonus_paid"] = round(float(finances.get("bonus_paid") or 0) + total, 1)
+    refresh_all_team_finances(season, lookup)
+    try:
+        from news import append_news
+
+        append_news(
+            season,
+            "championship_bonus",
+            team=team_name(season, team_id),
+            total=round(total, 1),
+        )
+    except ImportError:
+        pass
+    return round(total, 1)
+
+
+def clear_championship_bonuses(season):
+    for player in season.get("players", {}).values():
+        player.pop("championship_bonus", None)
+    for finances in season.get("team_finances", {}).values():
+        if isinstance(finances, dict):
+            finances.pop("bonus_paid", None)
 
 
 def validate_offer_terms(player, salary, years, team_id, season, lookup=None):
@@ -286,6 +475,9 @@ def _apply_signing(season, team_id, player, salary, years, lookup):
         )
     except ImportError:
         pass
+    from roster import reconcile_team_roster
+
+    reconcile_team_roster(season, team_id)
 
 
 def propose_offer(season, team_id, player_id, salary, years):
@@ -416,9 +608,18 @@ def sim_cpu_free_agency(season, rng=None, max_signings=8):
             candidates.append((team_id, fin["cap_space"]))
         if not candidates:
             continue
-        candidates.sort(key=lambda item: item[1], reverse=True)
+        from gm_personalities import cpu_fa_offer_multiplier, cpu_fa_team_priority
+
+        candidates.sort(
+            key=lambda item: item[1] + cpu_fa_team_priority(season, item[0], player),
+            reverse=True,
+        )
         team_id = rng.choice(candidates[:5])[0]
-        offer = min(ask * rng.uniform(1.0, 1.08), max_player_salary(player.get("overall") or 50))
+        multiplier = cpu_fa_offer_multiplier(season, team_id, player)
+        offer = min(
+            ask * rng.uniform(multiplier - 0.02, multiplier + 0.04),
+            max_player_salary(player.get("overall") or 50),
+        )
         years = rng.randint(1, MAX_FA_YEARS)
         accepted, _ = evaluate_offer(player, offer, years, season, team_id)
         if accepted:

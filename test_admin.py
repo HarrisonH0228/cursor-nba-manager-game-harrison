@@ -189,3 +189,34 @@ class AdminTeamAssignmentTests(unittest.TestCase):
         self.assertEqual(int(updated["team_id"]), new_team_id)
         self.assertNotIn(player_id, season_data["rosters"][str(old_team_id)])
         self.assertIn(player_id, season_data["rosters"][str(new_team_id)])
+
+    def test_admin_teams_page(self):
+        self._start_game_and_season()
+        response = self.client.get(
+            "/admin/teams",
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Team Rosters", response.data)
+        self.assertIn(b"Edit Roster", response.data)
+
+    def test_admin_team_roster_release(self):
+        self._start_game_and_season()
+        with self.client.session_transaction() as sess:
+            season_id = sess.get("season_id")
+        season_data, _ = season_store.load_season(season_id)
+        team_id = int(next(iter(season_data["rosters"])))
+        player_id = season_data["rosters"][str(team_id)][0]
+
+        response = self.client.post(
+            f"/admin/teams/{team_id}",
+            data={"action": "release", "player_id": str(player_id)},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+
+        season_data, _ = season_store.load_season(season_id)
+        lookup = league_lookup(season_data)
+        self.assertNotIn(player_id, season_data["rosters"][str(team_id)])
+        self.assertIsNone(lookup[player_id].get("team_id"))

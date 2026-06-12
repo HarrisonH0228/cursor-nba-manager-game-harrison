@@ -21,7 +21,13 @@ from draft import generate_rookie_profile
 from game import get_game, load_session_season, save_session_season
 from names import ensure_unique_name
 from ratings import compute_intrinsic_overall
-from roster import assign_player_to_team
+from roster import (
+    assign_player_to_team,
+    free_agent_players,
+    reconcile_team_roster,
+    release_player,
+    roster_size,
+)
 from season import allocate_player_id, league_lookup, refresh_all_roster_stats, roster_players, team_name
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -474,4 +480,84 @@ def admin_create_player():
         page_title="Create Player",
         teams=teams,
         attribute_keys=ATTRIBUTE_KEYS,
+    )
+
+
+@admin_bp.route("/teams")
+def admin_teams():
+    season_id, season_data, lookup, redirect_response = _season_or_redirect()
+    if redirect_response is not None:
+        return redirect_response
+
+    teams = []
+    for team in _admin_teams(season_data):
+        tid = team["team_id"]
+        record = season_data.get("standings", {}).get(str(tid), {})
+        teams.append(
+            {
+                **team,
+                "roster_size": roster_size(season_data, tid),
+                "record": f"{record.get('w', 0)}-{record.get('l', 0)}",
+            }
+        )
+
+    return render_template(
+        "admin/teams.html",
+        page_title="Admin Teams",
+        season=season_data,
+        teams=teams,
+    )
+
+
+@admin_bp.route("/teams/<int:team_id>", methods=["GET", "POST"])
+def admin_team_roster(team_id):
+    season_id, season_data, lookup, redirect_response = _season_or_redirect()
+    if redirect_response is not None:
+        return redirect_response
+
+    teams = _admin_teams(season_data)
+    valid_team_ids = {team["team_id"] for team in teams}
+    if team_id not in valid_team_ids:
+        flash("Team not found.", "error")
+        return redirect(url_for("admin.admin_teams"))
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "release":
+            player_id = _parse_int(request.form.get("player_id"))
+            if player_id:
+                ok, message = release_player(season_data, team_id, player_id, force=True)
+                flash(message, "success" if ok else "error")
+        elif action == "add_fa":
+            player_id = _parse_int(request.form.get("player_id"))
+            if player_id:
+                ok, message = assign_player_to_team(
+                    season_data, player_id, team_id, force=True
+                )
+                flash(message, "success" if ok else "error")
+        reconcile_team_roster(season_data, team_id)
+        refresh_all_roster_stats(season_data, lookup)
+        refresh_all_team_finances(season_data, lookup)
+        save_session_season(season_id, season_data)
+        return redirect(url_for("admin.admin_team_roster", team_id=team_id))
+
+    roster = roster_players(season_data, team_id, lookup)
+    roster.sort(key=lambda p: p.get("overall") or 0, reverse=True)
+    free_agents = sorted(
+        free_agent_players(season_data, lookup),
+        key=lambda p: p.get("overall") or 0,
+        reverse=True,
+    )[:50]
+    record = season_data.get("standings", {}).get(str(team_id), {})
+
+    return render_template(
+        "admin/team_roster.html",
+        page_title=f"Roster — {team_name(season_data, team_id)}",
+        season=season_data,
+        team_id=team_id,
+        team_name=team_name(season_data, team_id),
+        roster=roster,
+        free_agents=free_agents,
+        record=f"{record.get('w', 0)}-{record.get('l', 0)}",
+        roster_size=len(roster),
     )

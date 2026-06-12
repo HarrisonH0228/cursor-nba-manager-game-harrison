@@ -288,6 +288,9 @@ def _assign_rookie(season, prospect, team_id, draft_round=1):
     roster = season["rosters"].setdefault(str(team_id), [])
     if prospect["id"] not in roster:
         roster.append(prospect["id"])
+    from roster import reconcile_team_roster
+
+    reconcile_team_roster(season, team_id)
 
 
 def _advance_pick_state(season):
@@ -332,7 +335,9 @@ def make_pick(season, team_id, prospect=None, rng=None, auto_trim=False):
         )
         if not options:
             return False, "No prospects available."
-        prospect = _best_available(options)
+        from gm_personalities import pick_for_team
+
+        prospect = pick_for_team(season, team_id, options)
     else:
         prospect = dict(prospect)
 

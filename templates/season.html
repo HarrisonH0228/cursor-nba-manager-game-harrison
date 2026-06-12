@@ -35,11 +35,12 @@
 </div>
 {% endmacro %}
 
-{% macro bracket_series_card(entry, user_team_id) %}
+{% macro bracket_series_card(entry, user_team_id, is_finals=false) %}
 {% set series = entry.series %}
 {% set is_placeholder = series.get('placeholder') %}
 {% set is_user_series = not is_placeholder and user_team_id and (series.high_seed_id == user_team_id or series.low_seed_id == user_team_id) %}
-<div class="bracket-series{% if is_user_series %} user-series{% endif %}{% if is_placeholder %} bracket-series-placeholder{% endif %}{% if entry.grid_col is defined %} bracket-col-{{ entry.grid_col }}{% endif %}">
+{% set series_key = entry.round_idx ~ '-' ~ entry.series_idx %}
+<div class="bracket-series{% if is_user_series %} user-series{% endif %}{% if is_placeholder %} bracket-series-placeholder{% endif %}{% if is_finals %} bracket-series-finals{% endif %}{% if entry.grid_col is defined %} bracket-col-{{ entry.grid_col }}{% endif %}" data-series-key="{{ series_key }}">
   <div class="bracket-team{% if not is_placeholder and series.complete and series.winner_id == series.high_seed_id %} bracket-team-winner{% endif %}">
     {% if entry.high_seed_label %}<span class="bracket-seed">{{ entry.high_seed_label }}</span>{% endif %}
     {% if not is_placeholder %}<img class="team-logo-sm" data-team-logo="{{ series.high_seed_name }}" alt="" onerror="this.style.display='none'">{% endif %}
@@ -55,13 +56,21 @@
     {% if not is_placeholder %}<span class="bracket-wins">{{ series.low_wins }}</span>{% endif %}
   </div>
   {% if series.games %}
-  <div class="bracket-games">
-    {% for game in series.games %}
-    <a href="{{ url_for('season_playoff_box_score', round_idx=entry.round_idx, series_idx=entry.series_idx, game_idx=loop.index0) }}"
-       class="bracket-game-link{% if user_team_id and (game.home_id == user_team_id or game.away_id == user_team_id) %} bracket-game-user{% endif %}">
-      G{{ game.game_number }}: {{ game.home_score }}–{{ game.away_score }}
-    </a>
-    {% endfor %}
+  <div class="bracket-games-wrap">
+    <button type="button" class="bracket-games-toggle collapse-toggle-btn"
+            data-series-key="{{ series_key }}"
+            aria-expanded="{{ 'true' if is_user_series else 'false' }}"
+            aria-controls="bracket-games-{{ series_key }}">
+      Games ({{ series.games|length }}) <span class="bracket-toggle-icon">{{ '−' if is_user_series else '+' }}</span>
+    </button>
+    <div class="bracket-games" id="bracket-games-{{ series_key }}"{% if not is_user_series %} hidden{% endif %}>
+      {% for game in series.games %}
+      <a href="{{ url_for('season_playoff_box_score', round_idx=entry.round_idx, series_idx=entry.series_idx, game_idx=loop.index0) }}"
+         class="bracket-game-link{% if user_team_id and (game.home_id == user_team_id or game.away_id == user_team_id) %} bracket-game-user{% endif %}">
+        G{{ game.game_number }}: {{ game.home_score }}–{{ game.away_score }}
+      </a>
+      {% endfor %}
+    </div>
   </div>
   {% elif is_placeholder %}
   <div class="bracket-games bracket-games-pending"><span style="color:var(--text-muted);font-size:.75rem;">Awaiting winner</span></div>
@@ -149,7 +158,10 @@
 </div>
 
 {% if season.phase == 'complete' %}
-<div class="mb-4"><a href="{{ url_for('season_draft') }}" class="btn-nba-primary">Go to Draft →</a></div>
+<div class="mb-4 d-flex flex-wrap gap-2">
+  <a href="{{ url_for('season_year_end') }}" class="btn-nba-secondary">Year in Review →</a>
+  <a href="{{ url_for('season_draft') }}" class="btn-nba-primary">Go to Draft →</a>
+</div>
 {% elif season.phase == 'offseason' %}
 <div class="mb-4 d-flex gap-3 flex-wrap">
   <a href="{{ url_for('season_draft') }}" class="btn-nba-secondary">Draft Summary</a>
@@ -190,7 +202,7 @@
       <div class="bracket-round">
         <div class="bracket-round-name">{{ bracket.finals.name }}</div>
         {% for entry in bracket.finals.series %}
-        {{ bracket_series_card(entry, user_team_id) }}
+        {{ bracket_series_card(entry, user_team_id, true) }}
         {% endfor %}
       </div>
     </div>
@@ -220,22 +232,49 @@
   </div>
 </div>
 {% endif %}
+<script>
+(function () {
+  var storagePrefix = 'nba_bracket_series_';
+  document.querySelectorAll('.bracket-games-toggle').forEach(function (btn) {
+    var key = btn.getAttribute('data-series-key');
+    var panel = document.getElementById('bracket-games-' + key);
+    var icon = btn.querySelector('.bracket-toggle-icon');
+    if (!panel) return;
+
+    function setExpanded(expanded) {
+      panel.hidden = !expanded;
+      btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      if (icon) icon.textContent = expanded ? '−' : '+';
+      try { sessionStorage.setItem(storagePrefix + key, expanded ? '1' : '0'); } catch (e) {}
+    }
+
+    var stored = null;
+    try { stored = sessionStorage.getItem(storagePrefix + key); } catch (e) {}
+    if (stored === '1') setExpanded(true);
+    else if (stored === '0') setExpanded(false);
+
+    btn.addEventListener('click', function () {
+      setExpanded(panel.hidden);
+    });
+  });
+})();
+</script>
 {% endif %}
 
 {% elif page == 'schedule' %}
 <!-- ── SCHEDULE ── -->
 <div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:1.5rem;">
   <form method="post" action="{{ url_for('season_sim_day') }}">
-    <button type="submit" class="btn-nba-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Day</button>
+    <button type="submit" class="btn-nba-primary" {% if not can_sim_regular %}disabled{% endif %}>Sim Day</button>
   </form>
   <form method="post" action="{{ url_for('season_sim_week') }}">
-    <button type="submit" class="btn-nba-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Week</button>
+    <button type="submit" class="btn-nba-secondary" {% if not can_sim_regular %}disabled{% endif %}>Sim Week</button>
   </form>
   <form method="post" action="{{ url_for('season_sim_trade_deadline') }}">
-    <button type="submit" class="btn-nba-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim to Trade Deadline</button>
+    <button type="submit" class="btn-nba-secondary" {% if not can_sim_regular %}disabled{% endif %}>Sim to Trade Deadline</button>
   </form>
   <form method="post" action="{{ url_for('season_sim_full') }}">
-    <button type="submit" class="btn-nba-ghost" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Full Season</button>
+    <button type="submit" class="btn-nba-ghost" {% if not can_sim_regular %}disabled{% endif %}>Sim Full Season</button>
   </form>
 </div>
 
@@ -296,18 +335,36 @@
 <!-- ── STANDINGS HUB ── -->
 <div style="display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:1.5rem;">
   <form method="post" action="{{ url_for('season_sim_day') }}">
-    <button type="submit" class="btn-nba-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Day</button>
+    <button type="submit" class="btn-nba-primary" {% if not can_sim_regular %}disabled{% endif %}>Sim Day</button>
   </form>
   <form method="post" action="{{ url_for('season_sim_week') }}">
-    <button type="submit" class="btn-nba-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Week</button>
+    <button type="submit" class="btn-nba-secondary" {% if not can_sim_regular %}disabled{% endif %}>Sim Week</button>
   </form>
   <form method="post" action="{{ url_for('season_sim_trade_deadline') }}">
-    <button type="submit" class="btn-nba-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim to Trade Deadline</button>
+    <button type="submit" class="btn-nba-secondary" {% if not can_sim_regular %}disabled{% endif %}>Sim to Trade Deadline</button>
   </form>
   <form method="post" action="{{ url_for('season_sim_full') }}">
-    <button type="submit" class="btn-nba-ghost" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Full Season</button>
+    <button type="submit" class="btn-nba-ghost" {% if not can_sim_regular %}disabled{% endif %}>Sim Full Season</button>
   </form>
 </div>
+
+{% if expiring_contracts %}
+<div class="card-nba mb-4">
+  <div class="card-nba-header">
+    <h2>Expiring Contracts</h2>
+    <span class="badge-nba badge-nba-gray">{{ expiring_contracts|length }} player(s)</span>
+  </div>
+  <div class="card-nba-body">
+    {% for item in expiring_contracts %}
+    <div class="series-item" style="flex-wrap:wrap;">
+      <span style="font-weight:600;">{{ item.player_name }}</span>
+      <span style="color:var(--text-muted);font-size:.8rem;">{{ item.contract_years }} yr left · ask ~${{ item.extension_ask }}M</span>
+      <a href="{{ url_for('team') }}" class="btn-nba-ghost" style="font-size:.75rem;padding:.25rem .6rem;">Extend on My Team</a>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 {% if user_injury_report %}
 <div class="card-nba mb-4 injury-report-card" id="injury-report-card">
@@ -408,11 +465,18 @@
 <div class="mt-2"><a href="{{ url_for('season_playoffs') }}" class="btn-nba-success btn-nba-lg">Go to Playoffs →</a></div>
 {% endif %}
 {% if season.phase == 'complete' %}
-<div class="mt-2"><a href="{{ url_for('season_draft') }}" class="btn-nba-primary btn-nba-lg">Start Draft →</a></div>
+<div class="mt-2 d-flex flex-wrap gap-2">
+  <a href="{{ url_for('season_year_end') }}" class="btn-nba-secondary btn-nba-lg">Year in Review →</a>
+  <a href="{{ url_for('season_draft') }}" class="btn-nba-primary btn-nba-lg">Start Draft →</a>
+</div>
 {% elif season.phase == 'draft' %}
-<div class="mt-2"><a href="{{ url_for('season_draft') }}" class="btn-nba-primary btn-nba-lg">Continue Draft →</a></div>
+<div class="mt-2 d-flex flex-wrap gap-2 align-items-center">
+  <a href="{{ url_for('season_year_end') }}" class="btn-nba-ghost">Year in Review</a>
+  <a href="{{ url_for('season_draft') }}" class="btn-nba-primary btn-nba-lg">Continue Draft →</a>
+</div>
 {% elif season.phase == 'offseason' %}
-<div class="mt-2 d-flex flex-wrap gap-3">
+<div class="mt-2 d-flex flex-wrap gap-3 align-items-center">
+  <a href="{{ url_for('season_year_end') }}" class="btn-nba-ghost">Year in Review</a>
   <a href="{{ url_for('season_draft') }}" class="btn-nba-secondary">Draft Summary</a>
   <form method="post" action="{{ url_for('season_advance') }}">
     <button type="submit" class="btn-nba-success btn-nba-lg">Advance to Next Season</button>

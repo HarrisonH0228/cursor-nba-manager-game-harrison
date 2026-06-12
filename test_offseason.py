@@ -26,11 +26,14 @@ from season import (
     init_season,
     league_lookup,
     playoff_bracket_context,
+    record_championship,
     regular_season_complete,
     roster_players,
     seed_playoffs,
+    sim_day,
     sim_rest_of_season,
     sim_to_trade_deadline,
+    sim_week,
     simulate_all_playoffs,
 )
 from trade import cpu_accepts_trade, evaluate_trade, execute_trade, validate_trade
@@ -429,6 +432,43 @@ class OffseasonTests(unittest.TestCase):
         self.assertEqual(self.season["phase"], "regular_complete")
         self.assertLessEqual(self.season["current_day"], self.season["max_day"])
         self.assertTrue(regular_season_complete(self.season))
+
+    def test_sim_day_stops_at_max_day(self):
+        lookup = league_lookup(self.season)
+        max_day = self.season["max_day"]
+        self.season["current_day"] = max_day
+        count = sim_day(self.season, lookup, rng=self.rng)
+        self.assertGreaterEqual(count, 0)
+        self.assertEqual(self.season["current_day"], max_day)
+        self.assertEqual(self.season["phase"], "regular_complete")
+
+    def test_sim_day_no_op_past_max_day(self):
+        lookup = league_lookup(self.season)
+        self.season["current_day"] = self.season["max_day"] + 5
+        count = sim_day(self.season, lookup, rng=self.rng)
+        self.assertEqual(count, 0)
+
+    def test_sim_week_clamps_to_max_day(self):
+        lookup = league_lookup(self.season)
+        max_day = self.season["max_day"]
+        self.season["current_day"] = max(1, max_day - 2)
+        sim_week(self.season, lookup, rng=self.rng)
+        self.assertLessEqual(self.season["current_day"], max_day)
+
+    def test_record_championship_sets_pending_bonus_for_user(self):
+        lookup = league_lookup(self.season)
+        team_id = int(next(iter(self.season["rosters"])))
+        self.season["user_team_id"] = team_id
+        record_championship(self.season, team_id)
+        self.assertIn("pending_championship_bonus", self.season)
+        self.assertGreater(self.season["pending_championship_bonus"], 0)
+
+    def test_advance_season_rerolls_gm_profiles(self):
+        lookup = league_lookup(self.season)
+        self.season["phase"] = "offseason"
+        advance_season(self.season, rng=self.rng)
+        self.assertTrue(self.season.get("gm_personalities_enabled"))
+        self.assertGreater(len(self.season.get("gm_profiles") or {}), 0)
 
     def test_schedule_has_82_games_per_team(self):
         from season import _schedule_games_per_team, generate_schedule

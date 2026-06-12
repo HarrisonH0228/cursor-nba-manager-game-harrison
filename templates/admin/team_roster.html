@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <p class="section-title">Admin · Roster</p>
+    <h1>{{ team_name }}</h1>
+    <p class="text-muted-nba">{{ record }} · {{ roster_size }} players</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('admin.admin_teams') }}" class="btn-nba-ghost">← Teams</a>
+    <a href="{{ url_for('admin.admin_create_player') }}" class="btn-nba-secondary">Add Player</a>
+  </div>
+</div>
+
+<div class="card-nba mb-4" style="overflow-x:auto;">
+  <div class="card-nba-header"><h2>Current Roster</h2></div>
+  <table class="table-nba">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>OVR</th>
+        <th>Age</th>
+        <th>PPG</th>
+        <th>Salary</th>
+        <th>Contract</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for player in roster %}
+      <tr>
+        <td style="font-weight:600;">{{ player.name }}</td>
+        <td>{{ player.overall }}</td>
+        <td>{{ player.age }}</td>
+        <td>{{ player.ppg|stat1 }}</td>
+        <td>${{ player.salary }}M</td>
+        <td>{{ player.contract_years }} yr</td>
+        <td>
+          <div class="d-flex flex-wrap gap-1">
+            <a href="{{ url_for('admin.admin_edit_player', player_id=player.id) }}" class="btn-nba-ghost" style="padding:.3rem .55rem;font-size:.7rem;">Edit</a>
+            <form method="post" class="d-inline" onsubmit="return confirm('Release {{ player.name }} to free agency?');">
+              <input type="hidden" name="action" value="release">
+              <input type="hidden" name="player_id" value="{{ player.id }}">
+              <button type="submit" class="btn-nba-danger" style="padding:.3rem .55rem;font-size:.7rem;">Release</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:2rem;">Empty roster.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if free_agents %}
+<div class="card-nba">
+  <div class="card-nba-header"><h2>Add Free Agent</h2></div>
+  <div class="card-nba-body">
+    <form method="post" class="d-flex flex-wrap gap-2 align-items-end">
+      <input type="hidden" name="action" value="add_fa">
+      <div>
+        <label class="text-muted-nba" style="font-size:.8rem;">Player</label>
+        <select name="player_id" class="form-control" required style="min-width:220px;">
+          {% for fa in free_agents %}
+          <option value="{{ fa.id }}">{{ fa.name }} ({{ fa.overall }} OVR)</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn-nba-primary">Add to Roster</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

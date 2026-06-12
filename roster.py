@@ -72,20 +72,36 @@ def validate_roster_sizes_after_trade(
 
 def repair_roster_sync(season, team_id=None):
     """Fix team_id on players listed in a team's roster array."""
-    lookup = league_lookup(season)
     if team_id is not None:
-        team_ids = [_normalize_team_id(team_id)]
-    else:
-        team_ids = [_normalize_team_id(key) for key in season.get("rosters", {}).keys()]
+        reconcile_team_roster(season, team_id)
+        return
+    reconcile_all_rosters(season)
 
-    for tid in team_ids:
-        roster_ids = season.get("rosters", {}).get(str(tid), [])
-        label = team_name(season, tid)
-        for player_id in roster_ids:
-            player = lookup.get(int(player_id))
-            if player and _player_team_id(player) != tid:
-                player["team_id"] = tid
-                player["team"] = label
+
+def reconcile_team_roster(season, team_id):
+    """Keep roster array and player.team_id in sync for one team."""
+    lookup = league_lookup(season)
+    tid = _normalize_team_id(team_id)
+    roster_key = str(tid)
+    roster_ids = [int(pid) for pid in season.get("rosters", {}).get(roster_key, [])]
+    label = team_name(season, tid)
+    cleaned = []
+    for player_id in roster_ids:
+        player = lookup.get(player_id)
+        if not player:
+            continue
+        player["team_id"] = tid
+        player["team"] = label
+        cleaned.append(player_id)
+    for player in season.get("players", {}).values():
+        if _player_team_id(player) == tid and player.get("id") not in cleaned:
+            cleaned.append(int(player["id"]))
+    season["rosters"][roster_key] = cleaned
+
+
+def reconcile_all_rosters(season):
+    for team_id_str in season.get("rosters", {}).keys():
+        reconcile_team_roster(season, int(team_id_str))
 
 
 def _sync_free_agents(season):
@@ -162,6 +178,7 @@ def release_player(season, team_id, player_id, force=False):
     except ImportError:
         pass
     _sync_free_agents(season)
+    reconcile_team_roster(season, team_id)
     return True, f"Released {player.get('name', player_id)} to free agency."
 
 

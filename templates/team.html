@@ -34,6 +34,11 @@
 {% if not roster %}
 <div class="alert-nba alert-nba-warning">No players found on your roster.</div>
 {% else %}
+{% if expiring_contracts %}
+<div class="alert-nba alert-nba-info mb-3">
+  {{ expiring_contracts|length }} contract(s) expiring soon — extend below before they walk in free agency.
+</div>
+{% endif %}
 {% if can_release %}
 <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:.75rem;">
   Release players to free agency during the trade window (minimum 10 on roster).
@@ -66,14 +71,17 @@
         <th>APG</th>
         <th>SPG</th>
         <th>BPG</th>
-        {% if can_release %}<th></th>{% endif %}
+        {% if can_release or can_extend %}<th>Actions</th>{% endif %}
       </tr>
     </thead>
     <tbody>
       {% for player in roster %}
-      <tr>
+      <tr{% if player.contract_years is not none and player.contract_years <= 1 %} class="user-row"{% endif %}>
         <td style="font-weight:600;">
           {{ player.name }}
+          {% if player.championship_bonus %}
+          <span class="badge-nba" style="font-size:.65rem;margin-left:.35rem;background:#fbbf24;color:#000;">+${{ player.championship_bonus }}M</span>
+          {% endif %}
           {% if player.injury and player.injury.games_remaining %}
           <span class="badge-nba badge-nba-red" style="font-size:.65rem;margin-left:.35rem;">OUT {{ player.injury.games_remaining }}G</span>
           {% endif %}
@@ -93,12 +101,27 @@
         <td>{{ player.apg if player.apg is not none else '—' }}</td>
         <td style="color:var(--text-muted);">{{ player.spg if player.spg is not none else '—' }}</td>
         <td style="color:var(--text-muted);">{{ player.bpg if player.bpg is not none else '—' }}</td>
-        {% if can_release %}
+        {% if can_release or can_extend %}
         <td style="text-align:right;">
-          <form method="post" action="{{ url_for('team_release', player_id=player.id) }}" class="d-inline"
-                onsubmit="return confirm('Release {{ player.name }} to free agency?');">
-            <button type="submit" class="btn-nba-danger">Release</button>
-          </form>
+          <div class="d-flex flex-wrap gap-1 justify-content-end">
+            {% if can_extend and player.contract_years is not none and player.contract_years <= 1 %}
+            <form method="post" action="{{ url_for('team_extend', player_id=player.id) }}" class="d-flex flex-wrap gap-1 align-items-center">
+              <input type="number" name="salary" step="0.1" min="1" value="{{ player.salary * 1.1 if player.salary else 5 }}" class="form-control form-control-sm" style="width:4.5rem;" required>
+              <select name="years" class="form-control form-control-sm" style="width:3rem;">
+                {% for y in range(1, max_fa_years + 1) %}
+                <option value="{{ y }}" {% if y == 2 %}selected{% endif %}>{{ y }}y</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn-nba-primary" style="padding:.3rem .55rem;font-size:.7rem;">Extend</button>
+            </form>
+            {% endif %}
+            {% if can_release %}
+            <form method="post" action="{{ url_for('team_release', player_id=player.id) }}" class="d-inline"
+                  onsubmit="return confirm('Release {{ player.name }} to free agency?');">
+              <button type="submit" class="btn-nba-danger" style="padding:.3rem .55rem;font-size:.7rem;">Release</button>
+            </form>
+            {% endif %}
+          </div>
         </td>
         {% endif %}
       </tr>

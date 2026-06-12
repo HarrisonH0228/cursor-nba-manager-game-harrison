@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <p class="section-title">Admin</p>
+    <h1>Team Rosters</h1>
+  </div>
+  <a href="{{ url_for('admin.admin_index') }}" class="btn-nba-ghost">← Admin</a>
+</div>
+
+<div class="card-nba" style="overflow-x:auto;">
+  <table class="table-nba">
+    <thead>
+      <tr>
+        <th>Team</th>
+        <th>Record</th>
+        <th>Roster</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for team in teams %}
+      <tr>
+        <td style="font-weight:600;">{{ team.team_name }}</td>
+        <td>{{ team.record }}</td>
+        <td>{{ team.roster_size }} players</td>
+        <td style="text-align:right;">
+          <a href="{{ url_for('admin.admin_team_roster', team_id=team.team_id) }}" class="btn-nba-primary" style="padding:.35rem .75rem;font-size:.75rem;">Edit Roster</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

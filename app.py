@@ -1,4 +1,5 @@
 import os
+import random
 
 from dotenv import load_dotenv
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
@@ -50,10 +51,13 @@ from draft import (
     trade_pick_for_future,
 )
 from injuries import drain_pending_notifications, user_team_injury_report
+from gm_personalities import archetype_label, get_gm_profile
 from roster import (
     MAX_ROSTER,
     can_remove_player,
     free_agent_players,
+    reconcile_all_rosters,
+    reconcile_team_roster,
     release_player,
     repair_roster_sync,
     roster_size,
@@ -87,12 +91,15 @@ from attributes import refresh_team_roster_stats
 from contracts import (
     MAX_FA_YEARS,
     compute_asking_salary,
+    expiring_contract_report,
     min_acceptable_salary,
+    propose_extension,
     propose_offer,
     team_finances,
 )
 from news import news_headlines
 from scheduler import start_scheduler
+from year_end_report import get_year_end_report
 
 load_dotenv()
 
@@ -258,6 +265,40 @@ def _known_team_ids(all_players):
     }
 
 
+def _build_season_team_summaries(season_data, lookup):
+    reconcile_all_rosters(season_data)
+    summaries = []
+    for team_id_str in season_data.get("rosters", {}).keys():
+        team_id = int(team_id_str)
+        roster = roster_players(season_data, team_id, lookup)
+        top_player = max(
+            roster,
+            key=lambda player: player.get("overall") or 0,
+            default=None,
+        )
+        team_name_value = (
+            season_data.get("standings", {}).get(team_id_str, {}).get("team_name")
+            or (roster[0].get("team") if roster else str(team_id))
+        )
+        summaries.append(
+            {
+                "team_id": team_id,
+                "team": team_name_value,
+                "overall": compute_team_overall(roster),
+                "roster_size": roster_size(season_data, team_id),
+                "top_player_name": top_player.get("name") if top_player else None,
+                "top_player_overall": top_player.get("overall") if top_player else None,
+            }
+        )
+    return summaries
+
+
+def _can_sim_regular_season(season_data):
+    if not season_data or season_data.get("phase") != "regular":
+        return False
+    return season_data.get("current_day", 1) <= season_data.get("max_day", 1)
+
+
 @app.context_processor
 def inject_game():
     _, season_data = load_session_season()
@@ -274,6 +315,10 @@ def inject_game():
     user_championships = (
         championship_count(season_data, game["team_id"]) if game and season_data else 0
     )
+    user_roster_size = None
+    if game and season_data:
+        reconcile_team_roster(season_data, game["team_id"])
+        user_roster_size = roster_size(season_data, game["team_id"])
     return {
         "game": game,
         "active_season": season_data,
@@ -281,6 +326,7 @@ def inject_game():
         "max_roster": MAX_ROSTER,
         "news_headlines": headlines,
         "user_championships": user_championships,
+        "user_roster_size": user_roster_size,
     }
 
 
@@ -292,9 +338,12 @@ def index():
 
     cache_data, all_players = _active_players()
     _, season_data = load_session_season()
+    if season_data:
+        reconcile_team_roster(season_data, game["team_id"])
     team_info = _team_context(all_players, game["team_id"], season_data)
     roster = _sort_players(team_info["roster"], "overall", "desc")
     top_players = roster[:3]
+    user_count = roster_size(season_data, game["team_id"]) if season_data else len(roster)
 
     return render_template(
         "dashboard.html",
@@ -302,7 +351,7 @@ def index():
         team_name=game["team_name"],
         team_overall=team_info["team_overall"],
         team_rank=team_info["team_rank"],
-        roster_size=len(roster),
+        roster_size=user_count,
         top_players=top_players,
         team_finances=team_finances(season_data, game["team_id"]) if season_data else None,
         last_updated=cache_data.get("last_updated"),
@@ -367,13 +416,17 @@ def team():
     sort_key, order = _parse_sort_order("overall", "desc", ROSTER_SORT_COLUMNS)
     cache_data, all_players = _active_players()
     _, season_data = load_session_season()
+    lookup = league_lookup(season_data) if season_data else None
     if season_data:
-        repair_roster_sync(season_data, game["team_id"])
+        reconcile_team_roster(season_data, game["team_id"])
         refresh_team_roster_stats(roster_players(season_data, game["team_id"]))
     team_info = _team_context(all_players, game["team_id"], season_data)
     stat_ranks = compute_stat_ranks(all_players)
     roster = _sort_players(team_info["roster"], sort_key, order)
     _attach_roster_ranks(roster, stat_ranks)
+    expiring_contracts = (
+        expiring_contract_report(season_data, game["team_id"], lookup) if season_data else []
+    )
 
     def make_team_url(**overrides):
         params = {"sort": sort_key, "order": order}
@@ -387,9 +440,12 @@ def team():
         team_overall=team_info["team_overall"],
         team_rank=team_info["team_rank"],
         roster=roster,
-        roster_size=len(roster),
+        roster_size=roster_size(season_data, game["team_id"]) if season_data else len(roster),
         max_roster=MAX_ROSTER,
         can_release=season_data is not None and can_trade(season_data) and can_remove_player(season_data, game["team_id"]),
+        can_extend=season_data is not None and can_trade(season_data),
+        expiring_contracts=expiring_contracts,
+        max_fa_years=MAX_FA_YEARS,
         sort=sort_key,
         order=order,
         next_order=_next_order,
@@ -421,6 +477,35 @@ def team_release(player_id):
     return redirect(url_for("team"))
 
 
+@app.route("/team/extend/<int:player_id>", methods=["POST"])
+def team_extend(player_id):
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    season_id, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("team"))
+
+    salary_raw = request.form.get("salary", "").strip()
+    years_raw = request.form.get("years", "2").strip()
+    try:
+        salary = float(salary_raw)
+    except ValueError:
+        flash("Enter a valid salary.")
+        return redirect(url_for("team"))
+    years = int(years_raw) if years_raw.isdigit() else 2
+
+    ok, message, _accepted = propose_extension(
+        season_data, game["team_id"], player_id, salary, years
+    )
+    save_session_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("team"))
+
+
 @app.route("/free-agency")
 def free_agency():
     redirect_response = require_game()
@@ -434,6 +519,7 @@ def free_agency():
         return redirect(url_for("season_hub"))
 
     sort_key, order = _parse_sort_order("overall", "desc", ROSTER_SORT_COLUMNS)
+    reconcile_team_roster(season_data, game["team_id"])
     lookup = league_lookup(season_data)
     agents = _sort_players(free_agent_players(season_data, lookup), sort_key, order)
     user_roster_count = roster_size(season_data, game["team_id"])
@@ -561,6 +647,11 @@ def trade():
             "team_name", str(partner_id)
         )
 
+    partner_gm = None
+    if partner_id is not None:
+        profile = get_gm_profile(season_data, partner_id)
+        partner_gm = archetype_label(profile.get("archetype", "balanced"))
+
     return render_template(
         "trade.html",
         page_title="Trade Engine",
@@ -574,6 +665,7 @@ def trade():
         partner_name=partner_name,
         partner_roster=partner_roster,
         partner_picks=partner_picks,
+        partner_gm=partner_gm,
         trades=season_data.get("trades", [])[-10:],
         user_roster_size=roster_size(season_data, user_team_id),
         max_roster=MAX_ROSTER,
@@ -691,6 +783,8 @@ def search():
 
     cache_data, all_players = _active_players()
     _, season_data = load_session_season()
+    if season_data:
+        reconcile_all_rosters(season_data)
     game = get_game()
     known_team_ids = _known_team_ids(all_players)
 
@@ -777,7 +871,10 @@ def search():
         )
 
     if view == "teams":
-        teams = build_team_summaries(all_players)
+        if season_data and season_data.get("rosters"):
+            teams = _build_season_team_summaries(season_data, league_lookup(season_data))
+        else:
+            teams = build_team_summaries(all_players)
         team_ranks = compute_team_ranks(teams)
 
         if query:
@@ -885,9 +982,27 @@ def _flash_injury_notifications(season_data, user_team_id=None):
         flash(message, "warning")
 
 
+def _flash_championship_bonus(season_data):
+    """Flash pending championship bonus and clear it from season state."""
+    if not season_data:
+        return False
+    bonus = season_data.pop("pending_championship_bonus", None)
+    if bonus is not None:
+        flash(f"Championship bonus: ${bonus}M distributed to your roster!", "success")
+        return True
+    return False
+
+
 def _render_season(season_id, season_data, lookup, game, page="hub", schedule_day=None):
+    if _flash_championship_bonus(season_data):
+        _save_season(season_id, season_data)
     east_standings = standings_table(season_data, conference="East") if season_data else []
     west_standings = standings_table(season_data, conference="West") if season_data else []
+    expiring_contracts = (
+        expiring_contract_report(season_data, game["team_id"], lookup)
+        if season_data
+        else []
+    )
     schedule = []
     if season_data and page == "schedule":
         day_filter = schedule_day
@@ -914,6 +1029,9 @@ def _render_season(season_id, season_data, lookup, game, page="hub", schedule_da
         schedule_day=schedule_day or (season_data.get("current_day", 1) if season_data else 1),
         games_played=games_played_count(season_data) if season_data else 0,
         regular_complete=regular_season_complete(season_data) if season_data else False,
+        can_sim_regular=_can_sim_regular_season(season_data),
+        expiring_contracts=expiring_contracts,
+        max_fa_years=MAX_FA_YEARS,
     )
 
 
@@ -941,7 +1059,9 @@ def season_start():
 
     game = get_game()
     season_id = season_store.create_season_id()
-    season_data = init_season(all_players, season_year=cache_data.get("season") or 2026)
+    season_year = cache_data.get("season") or 2026
+    season_rng = random.Random(season_year)
+    season_data = init_season(all_players, season_year=season_year, rng=season_rng)
     season_data["user_team_id"] = game["team_id"]
     set_season_id(season_id)
     _save_season(season_id, season_data)
@@ -982,8 +1102,9 @@ def season_schedule():
 
     day_raw = request.args.get("day", "").strip()
     schedule_day = season_data.get("current_day", 1)
+    max_day = season_data.get("max_day", schedule_day)
     if day_raw.isdigit():
-        schedule_day = int(day_raw)
+        schedule_day = max(1, min(int(day_raw), max_day))
 
     return _render_season(
         season_id,
@@ -1033,6 +1154,9 @@ def season_sim_day():
     if season_data is None:
         flash("Start a season first.")
         return redirect(url_for("season_hub"))
+    if not _can_sim_regular_season(season_data):
+        flash("Regular season simulation is complete.")
+        return redirect(url_for("season_hub"))
 
     count = sim_day(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
@@ -1052,6 +1176,9 @@ def season_sim_week():
     if season_data is None:
         flash("Start a season first.")
         return redirect(url_for("season_hub"))
+    if not _can_sim_regular_season(season_data):
+        flash("Regular season simulation is complete.")
+        return redirect(url_for("season_hub"))
 
     count = sim_week(season_data, lookup, user_team_id=game["team_id"])
     _save_season(season_id, season_data)
@@ -1070,6 +1197,9 @@ def season_sim_trade_deadline():
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
         flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+    if not _can_sim_regular_season(season_data):
+        flash("Regular season simulation is complete.")
         return redirect(url_for("season_hub"))
 
     count = sim_to_trade_deadline(season_data, lookup, user_team_id=game["team_id"])
@@ -1181,8 +1311,40 @@ def season_sim_playoffs():
         count = advance_playoff_round(season_data, lookup)
         flash(f"Simulated playoff round: {count} series finished.")
 
+    _flash_championship_bonus(season_data)
     _save_season(season_id, season_data)
     return redirect(url_for("season_playoffs"))
+
+
+@app.route("/season/year-end")
+def season_year_end():
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    _, _, lookup, season_id, season_data = _season_context()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("season_hub"))
+
+    phase = season_data.get("phase")
+    if phase not in {"complete", "draft", "offseason"}:
+        flash("Year-end report is available after the playoffs conclude.")
+        return redirect(url_for("season_hub"))
+
+    had_report = bool(season_data.get("year_end_report"))
+    report = get_year_end_report(season_data, lookup)
+    if report and not had_report:
+        _save_season(season_id, season_data)
+
+    return render_template(
+        "year_end.html",
+        page_title="Year in Review",
+        season=season_data,
+        report=report,
+        user_team_id=game["team_id"],
+    )
 
 
 @app.route("/season/draft", methods=["GET"])
@@ -1198,6 +1360,8 @@ def season_draft():
         return redirect(url_for("season_hub"))
 
     phase = season_data.get("phase")
+    reconcile_team_roster(season_data, game["team_id"])
+    user_roster_count = roster_size(season_data, game["team_id"])
     if phase == "complete":
         return render_template(
             "draft.html",
@@ -1206,6 +1370,8 @@ def season_draft():
             phase=phase,
             board=None,
             user_team_id=game["team_id"],
+            user_roster_size=user_roster_count,
+            max_roster=MAX_ROSTER,
             positions_label=positions_label,
         )
 
@@ -1245,7 +1411,24 @@ def season_draft():
         pick_trade_ctx=pick_trade_ctx,
         trade_tolerance=TRADE_TOLERANCE,
         positions_label=positions_label,
+        user_roster_size=user_roster_count,
+        max_roster=MAX_ROSTER,
     )
+
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html", page_title="Terms of Service")
+
+
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html", page_title="Privacy Policy")
+
+
+@app.route("/disclaimer")
+def disclaimer():
+    return render_template("disclaimer.html", page_title="Disclaimer")
 
 
 @app.route("/season/draft/start", methods=["POST"])

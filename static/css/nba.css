@@ -701,6 +701,14 @@ h1, h2, h3, h4, h5, h6 {
   font-size: 0.8rem;
   color: var(--text-dim);
 }
+.footer-nba a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.footer-nba a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
 
 /* ── Playoff bracket ── */
 .series-item {
@@ -723,8 +731,8 @@ h1, h2, h3, h4, h5, h6 {
 .playoff-bracket {
   display: flex;
   align-items: stretch;
-  gap: 1rem;
-  min-width: min(100%, 960px);
+  gap: 1.5rem;
+  min-width: min(100%, 1040px);
 }
 .bracket-side {
   display: flex;
@@ -792,10 +800,11 @@ h1, h2, h3, h4, h5, h6 {
 .bracket-finals {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.75rem;
   flex-shrink: 0;
-  min-width: 11rem;
-  align-self: center;
+  min-width: 17rem;
+  padding: 0 0.5rem;
+  align-self: stretch;
 }
 .bracket-side-label {
   writing-mode: vertical-rl;
@@ -883,13 +892,43 @@ h1, h2, h3, h4, h5, h6 {
   min-width: 1rem;
   text-align: right;
 }
+.bracket-series-finals {
+  padding: 0.65rem 0.75rem;
+}
+.bracket-series-finals .bracket-team-name {
+  font-size: 0.85rem;
+}
+.bracket-games-wrap {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--border);
+}
+.bracket-games-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.25rem;
+  cursor: pointer;
+  border-radius: 0.25rem;
+}
+.bracket-games-toggle:hover {
+  color: var(--text);
+  background: var(--bg);
+}
 .bracket-games {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  margin-top: 0.35rem;
-  padding-top: 0.35rem;
-  border-top: 1px dashed var(--border);
+  margin-top: 0.25rem;
+}
+.bracket-games[hidden] {
+  display: none;
 }
 .bracket-games-pending {
   border-top-style: dashed;
@@ -1115,4 +1154,242 @@ form.d-inline { display: inline !important; }
 .choose-team-header {
   position: relative;
   z-index: 1;
+}
+
+/* ── Year-end newspaper report ── */
+.newspaper-wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  background: #f4efe6;
+  color: #1a1a1a;
+  border: 1px solid #c9b99a;
+  border-radius: var(--radius);
+  padding: 2rem 2.25rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.newspaper-masthead {
+  text-align: center;
+  border-bottom: 3px double #1a1a1a;
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.newspaper-tagline {
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #5c5348;
+  margin: 0 0 0.5rem;
+}
+
+.newspaper-title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 2.75rem;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.1;
+  color: #0d0d0d;
+}
+
+.newspaper-date {
+  font-size: 0.85rem;
+  color: #5c5348;
+  margin: 0.5rem 0 0;
+  font-style: italic;
+}
+
+.newspaper-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  background: #1a1a1a;
+  color: #f4efe6;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.75rem;
+  text-align: center;
+}
+
+.newspaper-banner-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #fbbf24;
+}
+
+.newspaper-banner-team {
+  font-family: Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.newspaper-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.newspaper-columns-triple {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 768px) {
+  .newspaper-columns,
+  .newspaper-columns-triple {
+    grid-template-columns: 1fr;
+  }
+}
+
+.newspaper-section-title {
+  font-family: Georgia, serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  border-bottom: 1px solid #1a1a1a;
+  padding-bottom: 0.35rem;
+  margin-bottom: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.newspaper-award-card {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px dashed #c9b99a;
+}
+
+.newspaper-award-name {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #5c5348;
+  margin: 0 0 0.35rem;
+}
+
+.newspaper-winner-name {
+  font-family: Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  display: block;
+}
+
+.newspaper-winner-team {
+  font-size: 0.85rem;
+  color: #5c5348;
+}
+
+.newspaper-statline {
+  font-size: 0.8rem;
+  margin: 0.35rem 0 0;
+  font-style: italic;
+}
+
+.newspaper-statline-sm {
+  font-size: 0.75rem;
+  color: #5c5348;
+  font-style: italic;
+}
+
+.newspaper-runners {
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  color: #5c5348;
+}
+
+.newspaper-runners-label {
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+
+.newspaper-leader-block {
+  margin-bottom: 1.25rem;
+}
+
+.newspaper-leader-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin: 0 0 0.35rem;
+}
+
+.newspaper-leader-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.82rem;
+}
+
+.newspaper-leader-list li {
+  margin-bottom: 0.25rem;
+}
+
+.newspaper-leader-name {
+  font-weight: 600;
+}
+
+.newspaper-leader-meta {
+  color: #5c5348;
+}
+
+.newspaper-honor-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.newspaper-honor-list li {
+  padding: 0.4rem 0;
+  border-bottom: 1px dotted #c9b99a;
+}
+
+.newspaper-rookie-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.newspaper-rookie-card {
+  flex: 1 1 140px;
+  padding: 0.75rem;
+  border: 1px solid #c9b99a;
+  background: #ebe4d8;
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.newspaper-you {
+  background: rgba(251, 191, 36, 0.2);
+  border-radius: 2px;
+}
+
+.newspaper-standings-table {
+  background: transparent;
+  color: #1a1a1a;
+}
+
+.newspaper-standings-table th {
+  color: #5c5348;
+  border-color: #c9b99a;
+}
+
+.newspaper-standings-table td {
+  border-color: #e0d5c4;
+}
+
+.newspaper-footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid #1a1a1a;
+}
+
+.newspaper-note {
+  font-size: 0.75rem;
+  color: #5c5348;
+  margin: 0.25rem 0 0;
 }

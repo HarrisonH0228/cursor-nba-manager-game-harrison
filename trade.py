@@ -145,21 +145,29 @@ def validate_trade(
 
 
 def cpu_accepts_trade(season, user_team_id, partner_team_id, outgoing_players, outgoing_picks, incoming_players, incoming_picks):
-    user_out = assets_value(season, outgoing_players, outgoing_picks, user_team_id)
-    user_in = assets_value(season, incoming_players, incoming_picks, partner_team_id)
-    partner_out = user_in
-    partner_in = user_out
-    return abs(partner_out - partner_in) <= TRADE_TOLERANCE
+    from gm_personalities import partner_trade_tolerance, trade_values_for_partner
+
+    partner_in, partner_out = trade_values_for_partner(
+        season,
+        user_team_id,
+        partner_team_id,
+        outgoing_players,
+        outgoing_picks,
+        incoming_players,
+        incoming_picks,
+    )
+    tolerance = partner_trade_tolerance(season, partner_team_id)
+    return abs(partner_out - partner_in) <= tolerance
 
 
-def _meter_label(partner_net, has_assets):
+def _meter_label(partner_net, has_assets, tolerance=TRADE_TOLERANCE):
     if not has_assets:
         return "Select assets to preview"
     if partner_net < -25:
         return "Hard pass"
-    if partner_net < -TRADE_TOLERANCE:
+    if partner_net < -tolerance:
         return "Unlikely"
-    if partner_net <= TRADE_TOLERANCE:
+    if partner_net <= tolerance:
         return "Likely to accept"
     return "Very appealing"
 
@@ -173,11 +181,21 @@ def evaluate_trade(
     incoming_players,
     incoming_picks,
 ):
+    from gm_personalities import partner_trade_tolerance, trade_values_for_partner
+
     has_assets = bool(outgoing_players or outgoing_picks or incoming_players or incoming_picks)
-    partner_in = assets_value(season, outgoing_players, outgoing_picks, user_team_id)
-    partner_out = assets_value(season, incoming_players, incoming_picks, partner_team_id)
+    partner_in, partner_out = trade_values_for_partner(
+        season,
+        user_team_id,
+        partner_team_id,
+        outgoing_players,
+        outgoing_picks,
+        incoming_players,
+        incoming_picks,
+    )
+    tolerance = partner_trade_tolerance(season, partner_team_id)
     partner_net = round(partner_in - partner_out, 1)
-    would_accept = has_assets and abs(partner_net) <= TRADE_TOLERANCE
+    would_accept = has_assets and abs(partner_net) <= tolerance
     meter = 50 if not has_assets else round(max(0, min(100, 50 + partner_net * 2)))
 
     return {
@@ -186,7 +204,7 @@ def evaluate_trade(
         "partner_net": partner_net,
         "would_accept": would_accept,
         "meter": meter,
-        "label": _meter_label(partner_net, has_assets),
+        "label": _meter_label(partner_net, has_assets, tolerance),
         "has_assets": has_assets,
     }
 

@@ -119,6 +119,21 @@ TEMPLATES = {
         "{team} trades draft capital for {year} R{round}. Spreadsheet enthusiasts rejoice.",
         "Draft board shake-up: {team} lands {year} R{round} via trade",
     ],
+    "gm_personality": [
+        "League buzz: a team hires a {archetype} GM — expect wild trades",
+        "Front office shake-up: new {archetype} GM takes the reins somewhere in the league",
+        "Sources say a {archetype} GM is calling the shots for a team this season",
+    ],
+    "championship_bonus": [
+        "{team} players cash championship bonus checks totaling ${total}M",
+        "Ring night payday: {team} roster splits ${total}M in title bonuses",
+        "{team} title bonus pool: ${total}M distributed to the roster",
+    ],
+    "year_end": [
+        "Year in Review: {mvp} named league MVP — full awards edition published",
+        "Hardwood Herald drops season awards: {mvp} takes MVP honors for {team}",
+        "Season wrap: {mvp} headlines the year-end awards report",
+    ],
     "championship": [
         "CHAMPIONS: {team} win the NBA Finals — Larry O'Brien trophy secured",
         "{team} capture the title. Parade planning already underway.",

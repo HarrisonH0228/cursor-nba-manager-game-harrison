@@ -148,9 +148,12 @@ def migrate_season(season, rng=None):
     if "championships" not in season:
         season["championships"] = {}
     season.setdefault("injury_week_counts", {})
-    from roster import repair_roster_sync
+    season.setdefault("gm_personalities_enabled", False)
+    season.setdefault("gm_profiles", {})
+    season.setdefault("contract_alerts", [])
+    from roster import reconcile_all_rosters
 
-    repair_roster_sync(season)
+    reconcile_all_rosters(season)
     lookup = league_lookup(season)
     for player in season.get("players", {}).values():
         backfill_career_metadata(player, rng)
@@ -260,6 +263,10 @@ def init_season(players, season_year=2026, rng=None):
         "injury_week_counts": {},
         "pending_notifications": [],
         "championships": {},
+        "gm_personalities_enabled": False,
+        "gm_profiles": {},
+        "contract_alerts": [],
+        "pending_championship_bonus": None,
     }
     _cap_team_rosters(season)
     from roster import _sync_free_agents
@@ -590,6 +597,11 @@ def advance_season(season, rng=None):
     for player in season.get("players", {}).values():
         player["season_gp"] = 0
         player["gp"] = 0
+    from contracts import clear_championship_bonuses
+    from gm_personalities import reroll_gm_personalities
+
+    clear_championship_bonuses(season)
+    reroll_gm_personalities(season, rng)
     return season
 
 
@@ -615,6 +627,12 @@ def record_championship(season, team_id):
         append_news(season, "championship", team=team_name(season, team_id))
     except ImportError:
         pass
+    from contracts import apply_championship_bonuses
+
+    bonus_total = apply_championship_bonuses(season, team_id)
+    user_team_id = season.get("user_team_id")
+    if user_team_id and int(user_team_id) == int(team_id):
+        season["pending_championship_bonus"] = bonus_total
     return championships[key]
 
 
@@ -858,10 +876,9 @@ def sim_rest_of_season(season, lookup, rng=None, user_team_id=None):
     # #endregion
 
     if complete or all_played:
-        season["phase"] = "regular_complete"
-        season["current_day"] = season.get("max_day", 1)
+        _finish_regular_season_day(season)
     else:
-        season["current_day"] = season.get("max_day", 1) + 1
+        season["current_day"] = min(season.get("current_day", 1), season.get("max_day", 1))
 
     # #region agent log
     _debug_log(
@@ -878,21 +895,44 @@ def sim_rest_of_season(season, lookup, rng=None, user_team_id=None):
     return games_played
 
 
-def sim_day(season, lookup, rng=None, user_team_id=None):
-    day = season.get("current_day", 1)
-    count = simulate_games(season, lookup, rng=rng, through_day=day, user_team_id=user_team_id)
-    season["current_day"] = day + 1
-    if regular_season_complete(season):
+def _finish_regular_season_day(season):
+    max_day = season.get("max_day", 1)
+    season["current_day"] = max_day
+    if regular_season_complete(season) or season.get("current_day", 1) >= max_day:
         season["phase"] = "regular_complete"
+
+
+def sim_day(season, lookup, rng=None, user_team_id=None):
+    if season.get("phase") != "regular":
+        return 0
+    day = season.get("current_day", 1)
+    max_day = season.get("max_day", day)
+    if day > max_day:
+        return 0
+    count = simulate_games(season, lookup, rng=rng, through_day=day, user_team_id=user_team_id)
+    if regular_season_complete(season) or day >= max_day:
+        _finish_regular_season_day(season)
+    else:
+        season["current_day"] = day + 1
     return count
 
 
 def sim_week(season, lookup, rng=None, user_team_id=None):
+    if season.get("phase") != "regular":
+        return 0
     start_day = season.get("current_day", 1)
-    count = simulate_games(season, lookup, rng=rng, count_days=7, user_team_id=user_team_id)
-    season["current_day"] = start_day + 7
-    if regular_season_complete(season):
-        season["phase"] = "regular_complete"
+    max_day = season.get("max_day", start_day)
+    if start_day > max_day:
+        return 0
+    days_to_sim = min(7, max_day - start_day + 1)
+    count = simulate_games(
+        season, lookup, rng=rng, count_days=days_to_sim, user_team_id=user_team_id
+    )
+    end_day = start_day + days_to_sim - 1
+    if regular_season_complete(season) or end_day >= max_day:
+        _finish_regular_season_day(season)
+    else:
+        season["current_day"] = start_day + days_to_sim
     return count
 
 
@@ -909,10 +949,11 @@ def sim_to_trade_deadline(season, lookup, rng=None, user_team_id=None):
             for game in season["schedule"]
             if not game["played"] and game["day"] == day
         ]
+        max_day = season.get("max_day", day)
         if not day_games:
-            if day > season.get("max_day", day):
+            if day >= max_day:
                 break
-            season["current_day"] = day + 1
+            season["current_day"] = min(day + 1, max_day)
             continue
 
         for game in day_games:
@@ -929,7 +970,9 @@ def sim_to_trade_deadline(season, lookup, rng=None, user_team_id=None):
         except ImportError:
             pass
 
-        season["current_day"] = day + 1
+        if day >= max_day:
+            break
+        season["current_day"] = min(day + 1, max_day)
 
     return games_played
 
@@ -1261,6 +1304,12 @@ def advance_playoff_round(season, lookup, rng=None):
             playoffs["champion_name"] = winners[0]["team_name"]
             record_championship(season, winners[0]["team_id"])
             season["phase"] = "complete"
+            try:
+                from year_end_report import build_year_end_report
+
+                build_year_end_report(season, lookup)
+            except ImportError:
+                pass
         return series_played
 
     if next_index == 1:

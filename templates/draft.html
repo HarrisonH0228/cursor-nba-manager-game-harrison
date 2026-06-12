@@ -9,6 +9,9 @@
     <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
       <span class="badge-nba badge-nba-gray">{{ season.season_year }}</span>
       <span class="badge-nba badge-nba-blue">{{ season.phase|replace('_',' ')|title }}</span>
+      {% if user_roster_size is defined %}
+      <span style="color:var(--text-muted);font-size:.8rem;">Roster: <strong style="color:var(--text);">{{ user_roster_size }} / {{ max_roster }}</strong></span>
+      {% endif %}
     </div>
     {% endif %}
   </div>

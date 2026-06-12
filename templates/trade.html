@@ -9,7 +9,7 @@
       {% if season %}
       <span class="badge-nba badge-nba-gray">{{ season.season_year }}</span>
       <span class="badge-nba badge-nba-blue">{{ season.phase|replace('_',' ')|title }}</span>
-      <span style="color:var(--text-muted);font-size:.8rem;">Roster: {{ user_roster_size }} / {{ max_roster }}</span>
+      <span style="color:var(--text-muted);font-size:.8rem;">Roster: <span id="trade-roster-count">{{ user_roster_size }}</span> / {{ max_roster }}</span>
       {% endif %}
     </div>
   </div>
@@ -46,7 +46,7 @@
     <div class="card-nba-body">
       <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.75rem;margin-bottom:.75rem;">
         <div>
-          <div class="section-title">Trade Appeal — {{ partner_name }}</div>
+          <div class="section-title">Trade Appeal — {{ partner_name }}{% if partner_gm %} <span class="badge-nba badge-nba-gray">{{ partner_gm }} GM</span>{% endif %}</div>
           <span id="trade-meter-label" class="badge-nba badge-nba-gray">Select assets to preview</span>
         </div>
       </div>
@@ -192,6 +192,9 @@
   const bar = document.getElementById("trade-meter-bar");
   const label = document.getElementById("trade-meter-label");
   const detail = document.getElementById("trade-meter-detail");
+  const rosterCountEl = document.getElementById("trade-roster-count");
+  const baseRosterSize = {{ user_roster_size }};
+  const maxRoster = {{ max_roster }};
   const partnerId = {{ partner_id }};
 
   function selectedValues(name) {
@@ -229,6 +232,13 @@
         detail.textContent = `They receive: ${data.partner_in} · They send: ${data.partner_out} · Net: ${netSign}${data.partner_net}`;
       } else {
         detail.textContent = "They receive: — · They send: — · Net: —";
+      }
+      if (rosterCountEl) {
+        const outP = selectedValues("outgoing_players").length;
+        const inP = selectedValues("incoming_players").length;
+        const projected = baseRosterSize - outP + inP;
+        rosterCountEl.textContent = projected;
+        rosterCountEl.style.color = (projected > maxRoster || projected < 10) ? "#f87171" : "";
       }
     })
     .catch(() => { label.textContent = "Preview unavailable"; });

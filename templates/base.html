@@ -35,6 +35,9 @@
         <div class="navbar-team-badge me-2">
           <img class="navbar-team-logo" src="" alt="" id="nav-team-logo" onerror="this.style.display='none'">
           <span id="nav-team-name">{{ game.team_name }}{% include "_championship_badge.html" %}</span>
+          {% if user_roster_size is not none %}
+          <span class="badge-nba badge-nba-gray" style="font-size:.7rem;">{{ user_roster_size }} / {{ max_roster }}</span>
+          {% endif %}
         </div>
 
         <a class="nav-link-nba" href="{{ url_for('index') }}">Dashboard</a>
@@ -122,7 +125,11 @@
 <!-- ── Footer ── -->
 <footer class="footer-nba">
   <div class="container">
-    NBA Manager &copy; 2026 &nbsp;·&nbsp; All NBA team names, logos and marks are property of the NBA.
+    NBA Manager &copy; 2026
+    &nbsp;·&nbsp; <a href="{{ url_for('terms') }}">Terms</a>
+    &nbsp;·&nbsp; <a href="{{ url_for('privacy') }}">Privacy</a>
+    &nbsp;·&nbsp; <a href="{{ url_for('disclaimer') }}">Disclaimer</a>
+    &nbsp;·&nbsp; All NBA team names, logos and marks are property of the NBA.
   </div>
 </footer>
 

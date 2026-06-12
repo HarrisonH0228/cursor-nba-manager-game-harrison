@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="newspaper-wrap">
+  <header class="newspaper-masthead">
+    <p class="newspaper-tagline">The Hardwood Herald · Season {{ report.season_year }} Final Edition</p>
+    <h1 class="newspaper-title">Year in Review</h1>
+    <p class="newspaper-date">{{ report.season_year }} NBA Season · Awards &amp; Leaders</p>
+  </header>
+
+  {% if report.champion and report.champion.team_name %}
+  <div class="newspaper-banner">
+    <span class="newspaper-banner-label">NBA Champions</span>
+    <span class="newspaper-banner-team">{{ report.champion.team_name }}</span>
+  </div>
+  {% endif %}
+
+  <div class="newspaper-columns">
+    <section class="newspaper-section newspaper-section-awards">
+      <h2 class="newspaper-section-title">Season Awards</h2>
+      {% for award in report.awards %}
+      <article class="newspaper-award-card">
+        <h3 class="newspaper-award-name">{{ award.title }}</h3>
+        <div class="newspaper-winner">
+          <span class="newspaper-winner-name{% if user_team_id and award.winner.team_id == user_team_id %} newspaper-you{% endif %}">
+            {{ award.winner.name }}
+          </span>
+          <span class="newspaper-winner-team">{{ award.winner.team_name }}</span>
+          {% if award.winner.line %}
+          <p class="newspaper-statline">{{ award.winner.line }}</p>
+          {% endif %}
+        </div>
+        {% if award.runners_up %}
+        <div class="newspaper-runners">
+          <span class="newspaper-runners-label">Also receiving votes:</span>
+          {% for runner in award.runners_up %}
+          <span class="newspaper-runner">{{ runner.name }} ({{ runner.team_name }})</span>{% if not loop.last %} · {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+      </article>
+      {% endfor %}
+
+      {% if report.coach_of_year %}
+      <article class="newspaper-award-card">
+        <h3 class="newspaper-award-name">Coach of the Year</h3>
+        <div class="newspaper-winner">
+          <span class="newspaper-winner-name">{{ report.coach_of_year.team_name }}</span>
+          <p class="newspaper-statline">{{ report.coach_of_year.record }} ({{ report.coach_of_year.win_pct }}%)</p>
+          <p class="newspaper-note">{{ report.coach_of_year.note }}</p>
+        </div>
+      </article>
+      {% endif %}
+    </section>
+
+    <section class="newspaper-section">
+      <h2 class="newspaper-section-title">Stat Leaders</h2>
+      {% for stat_key, block in report.stat_leaders.items() %}
+      <div class="newspaper-leader-block">
+        <h3 class="newspaper-leader-label">{{ block.label }}</h3>
+        <ol class="newspaper-leader-list">
+          {% for leader in block.leaders %}
+          <li class="{% if user_team_id and leader.team_id == user_team_id %}newspaper-you{% endif %}">
+            <span class="newspaper-leader-name">{{ leader.name }}</span>
+            <span class="newspaper-leader-meta">{{ leader.team_name }} — {{ leader.value|stat1 }}</span>
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+      {% endfor %}
+    </section>
+  </div>
+
+  <div class="newspaper-columns newspaper-columns-triple">
+    <section class="newspaper-section">
+      <h2 class="newspaper-section-title">All-NBA First Team</h2>
+      <ul class="newspaper-honor-list">
+        {% for player in report.all_nba_first %}
+        <li class="{% if user_team_id and player.team_id == user_team_id %}newspaper-you{% endif %}">
+          <strong>{{ player.name }}</strong> — {{ player.team_name }}
+          {% if player.line %}<br><span class="newspaper-statline-sm">{{ player.line }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="newspaper-section">
+      <h2 class="newspaper-section-title">All-NBA Second Team</h2>
+      <ul class="newspaper-honor-list">
+        {% for player in report.all_nba_second %}
+        <li class="{% if user_team_id and player.team_id == user_team_id %}newspaper-you{% endif %}">
+          <strong>{{ player.name }}</strong> — {{ player.team_name }}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="newspaper-section">
+      <h2 class="newspaper-section-title">All-Defensive First Team</h2>
+      <ul class="newspaper-honor-list">
+        {% for player in report.all_defense_first %}
+        <li class="{% if user_team_id and player.team_id == user_team_id %}newspaper-you{% endif %}">
+          <strong>{{ player.name }}</strong> — {{ player.team_name }}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  {% if report.all_rookie %}
+  <section class="newspaper-section newspaper-section-full">
+    <h2 class="newspaper-section-title">All-Rookie Team</h2>
+    <div class="newspaper-rookie-row">
+      {% for player in report.all_rookie %}
+      <div class="newspaper-rookie-card{% if user_team_id and player.team_id == user_team_id %} newspaper-you{% endif %}">
+        <strong>{{ player.name }}</strong>
+        <span>{{ player.team_name }}</span>
+        {% if player.line %}<span class="newspaper-statline-sm">{{ player.line }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if report.top_records %}
+  <section class="newspaper-section newspaper-section-full">
+    <h2 class="newspaper-section-title">Top Regular-Season Records</h2>
+    <table class="table-nba newspaper-standings-table">
+      <thead><tr><th>Team</th><th>W</th><th>L</th><th>Win%</th></tr></thead>
+      <tbody>
+        {% for row in report.top_records %}
+        <tr>
+          <td>{{ row.team_name }}</td>
+          <td>{{ row.w }}</td>
+          <td>{{ row.l }}</td>
+          <td>{{ row.win_pct }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <div class="newspaper-footer-nav">
+    <a href="{{ url_for('season_hub') }}" class="btn-nba-ghost">← Season Hub</a>
+    {% if season.phase == 'complete' %}
+    <a href="{{ url_for('season_draft') }}" class="btn-nba-primary">Continue to Draft →</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
