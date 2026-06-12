@@ -1,71 +1,47 @@
-# NBA Manager Game
+# [App Name]
 
-A browser-based NBA General Manager game. Search and browse live player stats pulled from NBA.com via the [nba_api](https://github.com/swar/nba_api) Python package.
+Simulates in an arcade-feel what it's like to be an NBA GM and to manage a team.
 
-## Requirements
+## Demo
+https://cursor-nba-manager-game-harrison-1.onrender.com/
 
-- Python **3.10+**
-- pip
+## Features
+- Player-driven simulated games
+- Players attributes change with age over time
+- Player stats depend on attribute
+
+## Tech Stack
+- Python 3 / Flask
+- Bootstrap 5
+- nba_api API
+- APScheduler
+- Deployed on Render
 
 ## Setup
+Establish a Python virtual environment, then run the command run flask OR you can run Python Debugger
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
+### Prerequisites
+- Python 3.x
+
+### Installation
+\`\`\`bash
+git clone https://github.com/HarrisonH0228/cursor-nba-manager-game-harrison
+cd ~Document/GitHub/cursor-nba-manager-game-harrison
 pip install -r requirements.txt
-```
+\`\`\`
 
-Create a `.env` file (optional):
+### Run Locally
+\`\`\`bash
+flask run
+\`\`\`
+Open http://localhost:5000
 
-```env
-FLASK_SECRET_KEY=your-secret-key
-ENABLE_SCHEDULER=true
-```
+## How It Works
+The app combines real NBA data with a locally simulated GM career. It fetches from stats.nba.com via nba_api, which is then processed into overall ratings and attributes for each player, then stored in data/cache.json. A scheduler in the background keeps that cache updated, and if the API is unavailable, the app falls back to the last cached snapshot.
+When you start a game, Flask assigns you a random NBA team and tracks your session inside the browser. Starting a season copies the cached player pool into a new save file under data/seasons/, then simulates a full league year using that copied file so the original cache isn't affected: schedule, standings, trades, free agency, playoffs, and draft. All GM actions read and write that season file while the cache remains the shared source of real world player identities and base stats.
+The UI is a Flask server that renders Bootstrap templates. Each page load pulls from the cache and/or your active season save, runs the relevant simulation or trade logic in Python, and returns HTML. There isn't a separate client app, the browser talks to Flask routes, and persistence is plain JSON on disk plus Flask session cookies for "who you are" and "which season you're in."
 
-No API key is required — `nba_api` uses public NBA.com stats endpoints.
-
-## Running locally
-
-```bash
-python app.py
-```
-
-Open http://127.0.0.1:5000/search
-
-## Refreshing player data
-
-Stats are cached in `data/cache.json`. Refresh locally (NBA.com blocks most cloud IPs):
-
-```bash
-python fetcher.py
-```
-
-Or click **Refresh Data** on the Search page while the app is running locally.
-
-The scheduler refreshes once per day when `ENABLE_SCHEDULER=true` (local dev only).
-
-## Deploying on Render
-
-1. Set `ENABLE_SCHEDULER=false` on Render — the app serves cached JSON only.
-2. Refresh data locally with `python fetcher.py`.
-3. Commit the updated `data/cache.json` and deploy.
-
-Render cannot call stats.nba.com directly in most cases. See [nba_api issue #176](https://github.com/swar/nba_api/issues/176).
-
-## Environment variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `FLASK_SECRET_KEY` | No | `dev` | Flask session secret |
-| `ENABLE_SCHEDULER` | No | `true` | Daily auto-refresh (disable on Render) |
-
-## Project structure
-
-```
-app.py          Flask routes
-fetcher.py      nba_api client + cache refresh
-cache.py        JSON file cache
-scheduler.py    Daily background refresh
-data/cache.json Cached player stats
-templates/      HTML views
-```
+## What I'd Build Next
+- I'd add salary caps and player contract negotiations
+- Make the other teams trade for and sign players
+- Make it more like a game, adding difficulties and modes
