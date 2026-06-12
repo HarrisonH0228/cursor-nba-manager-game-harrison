@@ -101,6 +101,12 @@ TEMPLATES = {
         "{team} selects {player}. Analytics guy nods, scout high-fives air.",
         "With the selection, {team} takes {player}. Future TBD.",
     ],
+    "fa_departure": [
+        "{player} ({age}) steps away from the NBA after going unsigned",
+        "No takers: {player} leaves for overseas at {age}",
+        "{player} calls it quits on NBA comeback hopes at {age}",
+        "Free agency exit: {player} ({age}) is done waiting for a deal",
+    ],
     "retirement": [
         "{player} hangs it up at {age}; league mourns, fantasy GMs rejoice",
         "{player} announces retirement. Highlights reel loading…",

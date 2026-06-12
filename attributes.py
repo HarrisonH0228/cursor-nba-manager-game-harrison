@@ -84,7 +84,7 @@ def _clamp_stat(value, stat):
     return max(0, round(value, 1))
 
 
-def role_factor_from_rank(rank, roster_size=15):
+def role_factor_from_rank(rank, roster_size=20):
     """Usage multiplier by roster rank (1 = top option)."""
     rank = max(1, int(rank))
     roster_size = max(rank, int(roster_size))
@@ -116,7 +116,7 @@ def _nonlinear_stat_value(attr_key, attr_value, stat, scale):
     return attr_value * scale
 
 
-def _compute_stat_line(attributes, player=None, role_rank=None, roster_size=15):
+def _compute_stat_line(attributes, player=None, role_rank=None, roster_size=20):
     multipliers = position_stat_multipliers(ensure_positions(player) if player else [])
     stat_mods = player.get("stat_modifiers", {}) if player else {}
     season_form = player.get("season_form", 1.0) if player else 1.0
@@ -381,7 +381,7 @@ def generate_rookie_attributes(overall, rng=None):
     return generate_rookie_profile(overall, rng)["attributes"]
 
 
-def season_averages_from_attributes(attributes, rng=None, player=None, role_rank=None, roster_size=15):
+def season_averages_from_attributes(attributes, rng=None, player=None, role_rank=None, roster_size=20):
     if rng is None:
         return season_averages_from_attributes_deterministic(
             attributes, player, role_rank=role_rank, roster_size=roster_size
@@ -395,7 +395,7 @@ def season_averages_from_attributes(attributes, rng=None, player=None, role_rank
 
 
 def season_averages_from_attributes_deterministic(
-    attributes, player=None, role_rank=None, roster_size=15
+    attributes, player=None, role_rank=None, roster_size=20
 ):
     if player and player.get("stats_source") == "nba_cache":
         cache_stats = player.get("cache_stats") or {}
@@ -571,6 +571,8 @@ def _apply_development(player, rng):
         if current >= ceiling:
             continue
         delta = max(1, round((ceiling - current) * growth_rate))
+        if player.get("two_way"):
+            delta = max(1, round(delta * 1.5))
         base[key] = _clamp(min(current + delta, ceiling))
 
 
@@ -669,7 +671,7 @@ def effective_attributes(player):
     return effective
 
 
-def refresh_player_from_attributes(player, effective_attrs=None, role_rank=None, roster_size=15):
+def refresh_player_from_attributes(player, effective_attrs=None, role_rank=None, roster_size=20):
     manual_ppg = None
     if player.get("stats_source") == "manual" and player.get("ppg") is not None:
         manual_ppg = float(player["ppg"])
@@ -705,23 +707,48 @@ def _remove_player_from_league(season, player_id):
     for roster in season.get("rosters", {}).values():
         while player_id in roster:
             roster.remove(player_id)
+    for tw_ids in season.get("two_way_assignments", {}).values():
+        while player_id in tw_ids:
+            tw_ids.remove(player_id)
     free_agents = season.get("free_agents", [])
     while player_id in free_agents:
         free_agents.remove(player_id)
 
 
+def _should_fa_depart(player):
+    unsigned = int(player.get("unsigned_seasons") or 0)
+    age = int(player.get("age") or 0)
+    overall = int(player.get("overall") or 0)
+    if unsigned >= 3 and age >= 32:
+        return True
+    if unsigned >= 2 and overall < 62:
+        return True
+    return False
+
+
 def apply_season_aging(season, rng=None):
     rng = rng or random.Random()
     retirements = []
+    departures = []
     players = list(season.get("players", {}).values())
-    retiring_ids = set()
+    removing_ids = set()
 
     for player in players:
         init_career_profile(player, rng)
         player["age"] = int(player.get("age", 25)) + 1
+        is_fa = not player.get("team_id")
+
+        if is_fa:
+            player["unsigned_seasons"] = int(player.get("unsigned_seasons") or 0) + 1
+            try:
+                from contracts import compute_asking_salary
+
+                player["asking_salary"] = compute_asking_salary(player)
+            except ImportError:
+                pass
 
         if player["age"] >= player["retirement_age"]:
-            retiring_ids.add(player["id"])
+            removing_ids.add(player["id"])
             retirements.append(
                 {
                     "player_id": player["id"],
@@ -733,15 +760,28 @@ def apply_season_aging(season, rng=None):
             )
             continue
 
+        if is_fa and _should_fa_depart(player):
+            removing_ids.add(player["id"])
+            departures.append(
+                {
+                    "player_id": player["id"],
+                    "name": player.get("name", str(player["id"])),
+                    "age": player["age"],
+                    "unsigned_seasons": player.get("unsigned_seasons"),
+                }
+            )
+            continue
+
         _apply_development(player, rng)
         _apply_seasonal_noise(player, rng)
         refresh_player_from_attributes(player)
         player["overall"] = compute_intrinsic_overall(player)
 
-    for player_id in retiring_ids:
+    for player_id in removing_ids:
         _remove_player_from_league(season, player_id)
 
     season["last_retirements"] = retirements
+    season["last_departures"] = departures
     return retirements
 
 

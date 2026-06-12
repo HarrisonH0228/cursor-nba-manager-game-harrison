@@ -12,7 +12,8 @@
       <span data-ovr="{{ team_overall }}">{{ team_overall }}</span>
       {% if team_rank %}<span class="badge-nba badge-nba-gray">League #{{ team_rank }}</span>{% endif %}
       {% endif %}
-      <span class="badge-nba badge-nba-blue">{{ roster_size }} / {{ max_roster }} players</span>
+      <span class="badge-nba badge-nba-blue">{{ roster_size }} / {{ max_roster }} NBA</span>
+      <span class="badge-nba badge-nba-gray">G-League: {{ g_league_roster|length }} / {{ max_two_way }}</span>
       {% if team_finances %}
       <span class="badge-nba badge-nba-gray">Cap: ${{ team_finances.cap_space }}M</span>
       <span class="badge-nba badge-nba-gray">Payroll: ${{ team_finances.payroll }}M</span>
@@ -76,14 +77,14 @@
     </thead>
     <tbody>
       {% for player in roster %}
-      <tr{% if player.contract_years is not none and player.contract_years <= 1 %} class="user-row"{% endif %}>
+      <tr{% if player.get('contract_years') is not none and player.get('contract_years') <= 1 %} class="user-row"{% endif %}>
         <td style="font-weight:600;">
           {{ player.name }}
-          {% if player.championship_bonus %}
-          <span class="badge-nba" style="font-size:.65rem;margin-left:.35rem;background:#fbbf24;color:#000;">+${{ player.championship_bonus }}M</span>
+          {% if player.get('championship_bonus') %}
+          <span class="badge-nba" style="font-size:.65rem;margin-left:.35rem;background:#fbbf24;color:#000;">+${{ player.get('championship_bonus') }}M</span>
           {% endif %}
-          {% if player.injury and player.injury.games_remaining %}
-          <span class="badge-nba badge-nba-red" style="font-size:.65rem;margin-left:.35rem;">OUT {{ player.injury.games_remaining }}G</span>
+          {% if player.get('injury') and player.get('injury', {}).get('games_remaining') %}
+          <span class="badge-nba badge-nba-red" style="font-size:.65rem;margin-left:.35rem;">OUT {{ player.get('injury', {}).get('games_remaining') }}G</span>
           {% endif %}
         </td>
         <td>
@@ -94,8 +95,8 @@
         <td><span class="badge-nba badge-nba-gray">{{ positions_label(player.positions) }}</span></td>
         <td>{{ player.age if player.age is not none else '—' }}</td>
         <td style="color:var(--text-muted);">{{ player.gp if player.gp is not none else '—' }}</td>
-        <td>${{ player.salary if player.salary is not none else '—' }}M</td>
-        <td>{{ player.contract_years if player.contract_years is not none else '—' }}</td>
+        <td>${{ player.salary if player.get('salary') is not none else '—' }}M</td>
+        <td>{{ player.get('contract_years') if player.get('contract_years') is not none else '—' }}</td>
         <td>{{ player.ppg|stat1 }}</td>
         <td>{{ player.rpg if player.rpg is not none else '—' }}</td>
         <td>{{ player.apg if player.apg is not none else '—' }}</td>
@@ -104,15 +105,20 @@
         {% if can_release or can_extend %}
         <td style="text-align:right;">
           <div class="d-flex flex-wrap gap-1 justify-content-end">
-            {% if can_extend and player.contract_years is not none and player.contract_years <= 1 %}
+            {% if can_extend and player.get('contract_years') is not none and player.get('contract_years') <= 1 %}
             <form method="post" action="{{ url_for('team_extend', player_id=player.id) }}" class="d-flex flex-wrap gap-1 align-items-center">
-              <input type="number" name="salary" step="0.1" min="1" value="{{ player.salary * 1.1 if player.salary else 5 }}" class="form-control form-control-sm" style="width:4.5rem;" required>
+              <input type="number" name="salary" step="0.1" min="1" value="{{ (player.get('salary') or 5) * 1.1 }}" class="form-control form-control-sm" style="width:4.5rem;" required>
               <select name="years" class="form-control form-control-sm" style="width:3rem;">
                 {% for y in range(1, max_fa_years + 1) %}
                 <option value="{{ y }}" {% if y == 2 %}selected{% endif %}>{{ y }}y</option>
                 {% endfor %}
               </select>
               <button type="submit" class="btn-nba-primary" style="padding:.3rem .55rem;font-size:.7rem;">Extend</button>
+            </form>
+            {% endif %}
+            {% if can_g_league_moves and can_assign_g_league and player.age is not none and player.age <= max_g_league_age %}
+            <form method="post" action="{{ url_for('team_g_league_send', player_id=player.id) }}" class="d-inline">
+              <button type="submit" class="btn-nba-secondary" style="padding:.3rem .55rem;font-size:.7rem;">G-League</button>
             </form>
             {% endif %}
             {% if can_release %}
@@ -129,6 +135,45 @@
     </tbody>
   </table>
 </div>
+
+{% if g_league_roster %}
+<div class="card-nba mt-4" style="overflow-x:auto;">
+  <div class="card-nba-body">
+    <p class="section-title">G-League (Two-Way)</p>
+    <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:.75rem;">
+      Young players develop faster in the G-League. Two-way salaries count at 50% against the cap.
+    </p>
+    <table class="table-nba" style="min-width:520px;">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>OVR</th>
+          <th>Age</th>
+          <th>Sal</th>
+          {% if can_g_league_moves %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for player in g_league_roster %}
+        <tr>
+          <td style="font-weight:600;">{{ player.name }}</td>
+          <td>{% if player.overall is not none %}<span data-ovr="{{ player.overall }}">{{ player.overall }}</span>{% else %}—{% endif %}</td>
+          <td>{{ player.age if player.age is not none else '—' }}</td>
+          <td>${{ player.salary if player.salary is not none else '—' }}M</td>
+          {% if can_g_league_moves %}
+          <td>
+            <form method="post" action="{{ url_for('team_g_league_recall', player_id=player.id) }}" class="d-inline">
+              <button type="submit" class="btn-nba-primary" style="padding:.3rem .55rem;font-size:.7rem;">Recall</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 {% endif %}
 {% endblock %}
 

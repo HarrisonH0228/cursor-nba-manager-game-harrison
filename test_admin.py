@@ -220,3 +220,37 @@ class AdminTeamAssignmentTests(unittest.TestCase):
         lookup = league_lookup(season_data)
         self.assertNotIn(player_id, season_data["rosters"][str(team_id)])
         self.assertIsNone(lookup[player_id].get("team_id"))
+
+
+class TeamPageRenderTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._orig_seasons_dir = season_store.SEASONS_DIR
+        cls._temp_dir = tempfile.mkdtemp()
+        season_store.SEASONS_DIR = cls._temp_dir
+
+    @classmethod
+    def tearDownClass(cls):
+        season_store.SEASONS_DIR = cls._orig_seasons_dir
+
+    def setUp(self):
+        self.client = app.test_client()
+        with self.client.session_transaction() as sess:
+            clear_game(sess)
+
+    def test_team_page_renders_without_contract_years(self):
+        self.client.post("/start", environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+        self.client.post("/season/start", environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+        with self.client.session_transaction() as sess:
+            season_id = sess.get("season_id")
+            team_id = sess.get("team_id")
+        season_data, _ = season_store.load_season(season_id)
+        player_id = season_data["rosters"][str(team_id)][0]
+        player = season_data["players"][str(player_id)]
+        player.pop("contract_years", None)
+        player.pop("salary", None)
+        season_store.save_season(season_id, season_data)
+
+        response = self.client.get("/team", environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(player["name"].encode(), response.data)

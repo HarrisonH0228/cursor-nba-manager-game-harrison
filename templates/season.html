@@ -35,11 +35,12 @@
 </div>
 {% endmacro %}
 
-{% macro bracket_series_card(entry, user_team_id, is_finals=false) %}
+{% macro bracket_series_card(entry, user_team_id, is_finals=false, conference='') %}
 {% set series = entry.series %}
 {% set is_placeholder = series.get('placeholder') %}
 {% set is_user_series = not is_placeholder and user_team_id and (series.high_seed_id == user_team_id or series.low_seed_id == user_team_id) %}
-{% set series_key = entry.round_idx ~ '-' ~ entry.series_idx %}
+{% set series_key = (conference or entry.conference or 'Finals') ~ '-' ~ entry.round_idx ~ '-' ~ entry.series_idx %}
+{% set box_series_idx = entry.global_series_idx if entry.global_series_idx is defined else entry.series_idx %}
 <div class="bracket-series{% if is_user_series %} user-series{% endif %}{% if is_placeholder %} bracket-series-placeholder{% endif %}{% if is_finals %} bracket-series-finals{% endif %}{% if entry.grid_col is defined %} bracket-col-{{ entry.grid_col }}{% endif %}" data-series-key="{{ series_key }}">
   <div class="bracket-team{% if not is_placeholder and series.complete and series.winner_id == series.high_seed_id %} bracket-team-winner{% endif %}">
     {% if entry.high_seed_label %}<span class="bracket-seed">{{ entry.high_seed_label }}</span>{% endif %}
@@ -65,7 +66,7 @@
     </button>
     <div class="bracket-games" id="bracket-games-{{ series_key }}"{% if not is_user_series %} hidden{% endif %}>
       {% for game in series.games %}
-      <a href="{{ url_for('season_playoff_box_score', round_idx=entry.round_idx, series_idx=entry.series_idx, game_idx=loop.index0) }}"
+      <a href="{{ url_for('season_playoff_box_score', round_idx=entry.round_idx, series_idx=box_series_idx, game_idx=loop.index0) }}"
          class="bracket-game-link{% if user_team_id and (game.home_id == user_team_id or game.away_id == user_team_id) %} bracket-game-user{% endif %}">
         G{{ game.game_number }}: {{ game.home_score }}–{{ game.away_score }}
       </a>
@@ -188,7 +189,7 @@
           {% for round in bracket.east_rounds %}
             {% for entry in round.series %}
             <div class="bracket-grid-cell" style="grid-row: {{ entry.grid_row }}; grid-column: {{ entry.grid_col }};">
-              {{ bracket_series_card(entry, user_team_id) }}
+              {{ bracket_series_card(entry, user_team_id, conference='East') }}
             </div>
             {% endfor %}
           {% endfor %}
@@ -222,7 +223,7 @@
           {% for round in bracket.west_rounds %}
             {% for entry in round.series %}
             <div class="bracket-grid-cell" style="grid-row: {{ entry.grid_row }}; grid-column: {{ entry.grid_col }};">
-              {{ bracket_series_card(entry, user_team_id) }}
+              {{ bracket_series_card(entry, user_team_id, conference='West') }}
             </div>
             {% endfor %}
           {% endfor %}

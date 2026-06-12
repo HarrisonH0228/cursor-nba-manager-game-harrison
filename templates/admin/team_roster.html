@@ -33,8 +33,8 @@
         <td>{{ player.overall }}</td>
         <td>{{ player.age }}</td>
         <td>{{ player.ppg|stat1 }}</td>
-        <td>${{ player.salary }}M</td>
-        <td>{{ player.contract_years }} yr</td>
+        <td>${{ player.get('salary', '—') }}M</td>
+        <td>{{ player.get('contract_years', '—') }} yr</td>
         <td>
           <div class="d-flex flex-wrap gap-1">
             <a href="{{ url_for('admin.admin_edit_player', player_id=player.id) }}" class="btn-nba-ghost" style="padding:.3rem .55rem;font-size:.7rem;">Edit</a>
@@ -52,6 +52,38 @@
     </tbody>
   </table>
 </div>
+
+{% if g_league_roster %}
+<div class="card-nba mb-4" style="overflow-x:auto;">
+  <div class="card-nba-header"><h2>G-League (Two-Way)</h2></div>
+  <table class="table-nba">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>OVR</th>
+        <th>Age</th>
+        <th>Salary</th>
+        <th>Contract</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for player in g_league_roster %}
+      <tr>
+        <td style="font-weight:600;">{{ player.name }}</td>
+        <td>{{ player.overall }}</td>
+        <td>{{ player.age }}</td>
+        <td>${{ player.get('salary', '—') }}M</td>
+        <td>{{ player.get('contract_years', '—') }} yr</td>
+        <td>
+          <a href="{{ url_for('admin.admin_edit_player', player_id=player.id) }}" class="btn-nba-ghost" style="padding:.3rem .55rem;font-size:.7rem;">Edit</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 {% if free_agents %}
 <div class="card-nba">

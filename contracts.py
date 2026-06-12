@@ -4,9 +4,10 @@ import random
 
 from season import league_lookup, roster_players, team_name
 
-SALARY_CAP_M = 140.0
+SALARY_CAP_M = 170.0
 MIN_SALARY_M = 1.0
-LUXURY_TAX_LINE_M = 165.0
+LUXURY_TAX_LINE_M = 195.0
+TWO_WAY_CAP_HIT_PCT = 0.5
 MIN_TEAM_SALARY_PCT = 0.90
 MAX_FA_YEARS = 4
 MAX_ROOKIE_YEARS = 4
@@ -138,6 +139,13 @@ def team_payroll(season, team_id, lookup=None):
     total = 0.0
     for player in roster_players(season, team_id, lookup):
         total += float(player.get("salary") or 0)
+    try:
+        from roster import two_way_players
+
+        for player in two_way_players(season, team_id, lookup):
+            total += float(player.get("salary") or 0) * TWO_WAY_CAP_HIT_PCT
+    except ImportError:
+        pass
     return round(total, 1)
 
 
@@ -462,6 +470,11 @@ def _apply_signing(season, team_id, player, salary, years, lookup):
     player["team_id"] = team_id
     player["team"] = team_name(season, team_id)
     player.pop("asking_salary", None)
+    player.pop("unsigned_seasons", None)
+    player.pop("two_way", None)
+    from roster import _remove_from_two_way
+
+    _remove_from_two_way(season, team_id, player_id)
     refresh_all_team_finances(season, lookup)
     try:
         from news import append_news
@@ -549,8 +562,13 @@ def expire_contracts(season, lookup=None):
                 roster.remove(player_id)
             player["previous_salary"] = player.get("salary")
             player["previous_team_id"] = team_id
+            tw_ids = season.setdefault("two_way_assignments", {}).get(str(team_id), [])
+            if player_id in tw_ids:
+                tw_ids.remove(player_id)
+            player.pop("two_way", None)
             player["team_id"] = None
             player["team"] = "Free Agent"
+            player["unsigned_seasons"] = 0
             player["asking_salary"] = compute_asking_salary(player)
             expired.append(player)
 

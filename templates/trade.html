@@ -18,6 +18,7 @@
 <!-- Trade window status -->
 <div class="alert-nba {% if can_trade %}alert-nba-success{% else %}alert-nba-warning{% endif %} mb-4">
   {{ trade_message }}
+  {% if can_trade %}<span style="display:block;margin-top:.35rem;font-size:.8rem;opacity:.9;">Your team must keep at least {{ min_roster }} players. CPU partners may complete trades below league minimum.</span>{% endif %}
 </div>
 
 <!-- Partner selector -->
@@ -195,6 +196,7 @@
   const rosterCountEl = document.getElementById("trade-roster-count");
   const baseRosterSize = {{ user_roster_size }};
   const maxRoster = {{ max_roster }};
+  const minRoster = {{ min_roster }};
   const partnerId = {{ partner_id }};
 
   function selectedValues(name) {
@@ -238,7 +240,7 @@
         const inP = selectedValues("incoming_players").length;
         const projected = baseRosterSize - outP + inP;
         rosterCountEl.textContent = projected;
-        rosterCountEl.style.color = (projected > maxRoster || projected < 10) ? "#f87171" : "";
+        rosterCountEl.style.color = (projected > maxRoster || projected < minRoster) ? "#f87171" : "";
       }
     })
     .catch(() => { label.textContent = "Preview unavailable"; });

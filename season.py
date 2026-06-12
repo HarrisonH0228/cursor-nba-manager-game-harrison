@@ -118,8 +118,11 @@ def refresh_all_roster_stats(season, lookup=None):
         refresh_team_roster_stats(roster)
 
 
-def _cap_team_rosters(season, max_size=15):
+def _cap_team_rosters(season, max_size=None):
     from roster import MAX_ROSTER, release_player
+
+    if max_size is None:
+        max_size = MAX_ROSTER
 
     lookup = league_lookup(season)
     for team_id_str, roster_ids in list(season.get("rosters", {}).items()):
@@ -151,6 +154,7 @@ def migrate_season(season, rng=None):
     season.setdefault("gm_personalities_enabled", False)
     season.setdefault("gm_profiles", {})
     season.setdefault("contract_alerts", [])
+    season.setdefault("two_way_assignments", {})
     from roster import reconcile_all_rosters
 
     reconcile_all_rosters(season)
@@ -589,6 +593,13 @@ def advance_season(season, rng=None):
             append_news(
                 season,
                 "retirement",
+                player=item.get("name", "Unknown"),
+                age=item.get("age"),
+            )
+        for item in season.get("last_departures") or []:
+            append_news(
+                season,
+                "fa_departure",
                 player=item.get("name", "Unknown"),
                 age=item.get("age"),
             )
@@ -1041,6 +1052,7 @@ BRACKET_ROUND_NAMES = [
     "Conference Finals",
 ]
 BRACKET_SERIES_COUNTS = [4, 2, 1]
+EAST_SERIES_PER_ROUND = BRACKET_SERIES_COUNTS
 EAST_GRID_ROWS = [[1], [3], [5], [7], [2], [6], [4]]
 WEST_GRID_ROWS = [[1], [3], [5], [7], [2], [6], [4]]
 EAST_GRID_COLS = [1, 1, 1, 1, 2, 2, 3]
@@ -1063,11 +1075,21 @@ def _placeholder_series(conference):
     }
 
 
+def _global_series_idx(conference, round_idx, local_idx):
+    """Map conference-local series index to flat rounds[round_idx]['series'] index."""
+    base = sum(EAST_SERIES_PER_ROUND[:round_idx])
+    if conference == "West":
+        base += EAST_SERIES_PER_ROUND[round_idx]
+    return base + local_idx
+
+
 def _bracket_entry(series, round_idx, series_idx, conference, slot_index):
     entry = {
         "series": series,
         "round_idx": round_idx,
         "series_idx": series_idx,
+        "global_series_idx": _global_series_idx(conference, round_idx, series_idx),
+        "conference": conference,
         "high_seed_label": None,
         "low_seed_label": None,
         "grid_row": EAST_GRID_ROWS[slot_index][0],

@@ -17,6 +17,40 @@
   <a href="{{ url_for('team') }}" class="btn-nba-secondary">My Team</a>
 </div>
 
+<form method="get" action="{{ url_for('free_agency') }}" class="card-nba mb-3" style="padding:.85rem 1rem;">
+  <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-end;">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="order" value="{{ order }}">
+    <div>
+      <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:.2rem;">Search</label>
+      <input type="search" name="q" value="{{ fa_query }}" placeholder="Player name…" class="form-control form-control-sm" style="min-width:10rem;">
+    </div>
+    <div>
+      <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:.2rem;">Position</label>
+      <select name="pos" class="form-control form-control-sm">
+        <option value="">All</option>
+        {% for p in ['PG','SG','SF','PF','C'] %}
+        <option value="{{ p }}" {% if fa_pos == p %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:.2rem;">Min OVR</label>
+      <input type="number" name="min_ovr" value="{{ fa_min_ovr }}" min="0" max="99" class="form-control form-control-sm" style="width:4.5rem;">
+    </div>
+    <div>
+      <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:.2rem;">Max OVR</label>
+      <input type="number" name="max_ovr" value="{{ fa_max_ovr }}" min="0" max="99" class="form-control form-control-sm" style="width:4.5rem;">
+    </div>
+    <div>
+      <label style="font-size:.7rem;color:var(--text-muted);display:block;margin-bottom:.2rem;">Max age</label>
+      <input type="number" name="max_age" value="{{ fa_max_age }}" min="18" max="45" class="form-control form-control-sm" style="width:4.5rem;">
+    </div>
+    <button type="submit" class="btn-nba-primary" style="padding:.4rem .85rem;font-size:.8rem;">Filter</button>
+    <a href="{{ url_for('free_agency') }}" class="btn-nba-ghost" style="padding:.4rem .85rem;font-size:.8rem;">Clear</a>
+  </div>
+</form>
+
 <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;">
   {% for col, label in [('overall','OVR'),('name','Name'),('age','Age'),('ppg','PPG'),('rpg','RPG'),('apg','APG')] %}
   <a href="{{ make_fa_url(sort=col, order=next_order(col, sort, order)) }}"

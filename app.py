@@ -3,6 +3,7 @@ import random
 
 from dotenv import load_dotenv
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from werkzeug.exceptions import HTTPException
 
 import cache
 from fetcher import fetch_teams, refresh_cache
@@ -53,14 +54,21 @@ from draft import (
 from injuries import drain_pending_notifications, user_team_injury_report
 from gm_personalities import archetype_label, get_gm_profile
 from roster import (
+    MAX_G_LEAGUE_AGE,
     MAX_ROSTER,
+    MAX_TWO_WAY,
+    MIN_ROSTER,
+    assign_to_g_league,
+    can_assign_two_way,
     can_remove_player,
     free_agent_players,
+    recall_from_g_league,
     reconcile_all_rosters,
     reconcile_team_roster,
     release_player,
     repair_roster_sync,
     roster_size,
+    two_way_players,
 )
 from trade import (
     cpu_accepts_trade,
@@ -91,6 +99,7 @@ from attributes import refresh_team_roster_stats
 from contracts import (
     MAX_FA_YEARS,
     compute_asking_salary,
+    ensure_contract_fields,
     expiring_contract_report,
     min_acceptable_salary,
     propose_extension,
@@ -324,6 +333,9 @@ def inject_game():
         "active_season": season_data,
         "positions_label": positions_label,
         "max_roster": MAX_ROSTER,
+        "min_roster": MIN_ROSTER,
+        "max_two_way": MAX_TWO_WAY,
+        "max_g_league_age": MAX_G_LEAGUE_AGE,
         "news_headlines": headlines,
         "user_championships": user_championships,
         "user_roster_size": user_roster_size,
@@ -419,11 +431,17 @@ def team():
     lookup = league_lookup(season_data) if season_data else None
     if season_data:
         reconcile_team_roster(season_data, game["team_id"])
+        ensure_contract_fields(season_data)
         refresh_team_roster_stats(roster_players(season_data, game["team_id"]))
     team_info = _team_context(all_players, game["team_id"], season_data)
     stat_ranks = compute_stat_ranks(all_players)
     roster = _sort_players(team_info["roster"], sort_key, order)
     _attach_roster_ranks(roster, stat_ranks)
+    g_league_roster = []
+    if season_data:
+        g_league_roster = _sort_players(
+            two_way_players(season_data, game["team_id"], lookup), sort_key, order
+        )
     expiring_contracts = (
         expiring_contract_report(season_data, game["team_id"], lookup) if season_data else []
     )
@@ -440,10 +458,16 @@ def team():
         team_overall=team_info["team_overall"],
         team_rank=team_info["team_rank"],
         roster=roster,
+        g_league_roster=g_league_roster,
         roster_size=roster_size(season_data, game["team_id"]) if season_data else len(roster),
         max_roster=MAX_ROSTER,
+        max_two_way=MAX_TWO_WAY,
+        can_assign_g_league=season_data is not None
+        and can_trade(season_data)
+        and can_assign_two_way(season_data, game["team_id"]),
         can_release=season_data is not None and can_trade(season_data) and can_remove_player(season_data, game["team_id"]),
         can_extend=season_data is not None and can_trade(season_data),
+        can_g_league_moves=season_data is not None and can_trade(season_data),
         expiring_contracts=expiring_contracts,
         max_fa_years=MAX_FA_YEARS,
         sort=sort_key,
@@ -506,6 +530,64 @@ def team_extend(player_id):
     return redirect(url_for("team"))
 
 
+@app.route("/team/g-league/<int:player_id>", methods=["POST"])
+def team_g_league_send(player_id):
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    season_id, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("team"))
+
+    ok, message = assign_to_g_league(season_data, game["team_id"], player_id)
+    if ok:
+        save_session_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("team"))
+
+
+@app.route("/team/g-league/recall/<int:player_id>", methods=["POST"])
+def team_g_league_recall(player_id):
+    redirect_response = require_game()
+    if redirect_response is not None:
+        return redirect_response
+
+    game = get_game()
+    season_id, season_data = load_session_season()
+    if season_data is None:
+        flash("Start a season first.")
+        return redirect(url_for("team"))
+
+    ok, message = recall_from_g_league(season_data, game["team_id"], player_id)
+    if ok:
+        save_session_season(season_id, season_data)
+    flash(message)
+    return redirect(url_for("team"))
+
+
+def _filter_free_agents(players, query="", position="", min_ovr=None, max_ovr=None, max_age=None):
+    filtered = players
+    if query:
+        needle = query.casefold()
+        filtered = [p for p in filtered if needle in (p.get("name") or "").casefold()]
+    if position:
+        filtered = [
+            p
+            for p in filtered
+            if position in (p.get("positions") or [])
+        ]
+    if min_ovr is not None:
+        filtered = [p for p in filtered if int(p.get("overall") or 0) >= min_ovr]
+    if max_ovr is not None:
+        filtered = [p for p in filtered if int(p.get("overall") or 99) <= max_ovr]
+    if max_age is not None:
+        filtered = [p for p in filtered if int(p.get("age") or 99) <= max_age]
+    return filtered
+
+
 @app.route("/free-agency")
 def free_agency():
     redirect_response = require_game()
@@ -521,13 +603,37 @@ def free_agency():
     sort_key, order = _parse_sort_order("overall", "desc", ROSTER_SORT_COLUMNS)
     reconcile_team_roster(season_data, game["team_id"])
     lookup = league_lookup(season_data)
-    agents = _sort_players(free_agent_players(season_data, lookup), sort_key, order)
+    fa_query = request.args.get("q", "").strip()
+    fa_pos = request.args.get("pos", "").strip().upper()
+    min_ovr_raw = request.args.get("min_ovr", "").strip()
+    max_ovr_raw = request.args.get("max_ovr", "").strip()
+    max_age_raw = request.args.get("max_age", "").strip()
+    min_ovr = int(min_ovr_raw) if min_ovr_raw.isdigit() else None
+    max_ovr = int(max_ovr_raw) if max_ovr_raw.isdigit() else None
+    max_age = int(max_age_raw) if max_age_raw.isdigit() else None
+    agents = _filter_free_agents(
+        free_agent_players(season_data, lookup),
+        query=fa_query,
+        position=fa_pos if fa_pos in {"PG", "SG", "SF", "PF", "C"} else "",
+        min_ovr=min_ovr,
+        max_ovr=max_ovr,
+        max_age=max_age,
+    )
+    agents = _sort_players(agents, sort_key, order)
     user_roster_count = roster_size(season_data, game["team_id"])
 
     def make_fa_url(**overrides):
-        params = {"sort": sort_key, "order": order}
+        params = {
+            "sort": sort_key,
+            "order": order,
+            "q": fa_query,
+            "pos": fa_pos,
+            "min_ovr": min_ovr_raw,
+            "max_ovr": max_ovr_raw,
+            "max_age": max_age_raw,
+        }
         params.update(overrides)
-        return url_for("free_agency", **params)
+        return url_for("free_agency", **{k: v for k, v in params.items() if v not in (None, "")})
 
     finances = team_finances(season_data, game["team_id"], lookup)
     for player in agents:
@@ -548,6 +654,11 @@ def free_agency():
         positions_label=positions_label,
         team_finances=finances,
         max_fa_years=MAX_FA_YEARS,
+        fa_query=fa_query,
+        fa_pos=fa_pos,
+        fa_min_ovr=min_ovr_raw,
+        fa_max_ovr=max_ovr_raw,
+        fa_max_age=max_age_raw,
     )
 
 
@@ -711,6 +822,15 @@ def trade_propose():
         flash(message)
         return redirect(url_for("trade", partner=partner_id))
 
+    preview = evaluate_trade(
+        season_data,
+        game["team_id"],
+        partner_id,
+        outgoing_players,
+        outgoing_picks,
+        incoming_players,
+        incoming_picks,
+    )
     if not cpu_accepts_trade(
         season_data,
         game["team_id"],
@@ -720,7 +840,11 @@ def trade_propose():
         incoming_players,
         incoming_picks,
     ):
-        flash("Trade rejected — value too far apart.")
+        tolerance = preview.get("tolerance", TRADE_TOLERANCE)
+        if preview["partner_net"] > tolerance:
+            flash("Trade rejected — partner had second thoughts.")
+        else:
+            flash("Trade rejected — value too far apart.")
         return redirect(url_for("trade", partner=partner_id))
 
     ok, message = execute_trade(
@@ -1576,6 +1700,12 @@ def season_advance():
         if len(retirements) > 8:
             names += f", +{len(retirements) - 8} more"
         message = f"{message} Retired: {names}."
+    departures = season_data.get("last_departures") or []
+    if departures:
+        names = ", ".join(f"{item['name']}" for item in departures[:8])
+        if len(departures) > 8:
+            names += f", +{len(departures) - 8} more"
+        message = f"{message} Left FA pool: {names}."
     flash(message)
     return redirect(url_for("season_hub"))
 
@@ -1590,6 +1720,23 @@ def refresh():
     if success:
         return redirect(url_for("search", refreshed=1))
     return redirect(url_for("search", stale=1))
+
+
+@app.errorhandler(400)
+@app.errorhandler(403)
+@app.errorhandler(405)
+def http_error(error):
+    code = error.code if isinstance(error, HTTPException) else 500
+    message = error.description if isinstance(error, HTTPException) and error.description else "Request failed."
+    return (
+        render_template(
+            "error.html",
+            page_title="Error",
+            error_code=code,
+            error_message=message,
+        ),
+        code,
+    )
 
 
 @app.errorhandler(404)
@@ -1608,6 +1755,22 @@ def not_found(error):
 @app.errorhandler(500)
 def server_error(error):
     app.logger.exception("Internal server error: %s", error)
+    return (
+        render_template(
+            "error.html",
+            page_title="Error",
+            error_code=500,
+            error_message="Something went wrong. Please try again.",
+        ),
+        500,
+    )
+
+
+@app.errorhandler(Exception)
+def unhandled_exception(error):
+    if isinstance(error, HTTPException):
+        return error
+    app.logger.exception("Unhandled exception: %s", error)
     return (
         render_template(
             "error.html",

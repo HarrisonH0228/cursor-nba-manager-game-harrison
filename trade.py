@@ -1,12 +1,20 @@
 """Trade engine: player and draft pick trades with arcade value model."""
 
+import random
+
 from attributes import age_multiplier
-from roster import release_worst_players, roster_size, validate_roster_sizes_after_trade
+from roster import MAX_ROSTER, release_worst_players, roster_size, validate_roster_sizes_after_trade
 from season import can_trade, league_lookup, team_name
 
 TRADE_TOLERANCE = 15
+VERY_APPEALING_REJECTION_CHANCE = 0.10
 
 ROUND_BASE_VALUE = {1: 80, 2: 35, 3: 15}
+
+
+def partner_would_consider_trade(partner_net, tolerance):
+    """CPU accepts if they are not losing more than their tolerance."""
+    return partner_net >= -tolerance
 
 
 def age_factor(age, peak_age=None):
@@ -129,6 +137,7 @@ def validate_trade(
         outgoing_players,
         incoming_players,
         check_partner_max=False,
+        check_partner_min=False,
     )
     if not ok:
         return False, message
@@ -144,7 +153,16 @@ def validate_trade(
     return True, None
 
 
-def cpu_accepts_trade(season, user_team_id, partner_team_id, outgoing_players, outgoing_picks, incoming_players, incoming_picks):
+def cpu_accepts_trade(
+    season,
+    user_team_id,
+    partner_team_id,
+    outgoing_players,
+    outgoing_picks,
+    incoming_players,
+    incoming_picks,
+    rng=None,
+):
     from gm_personalities import partner_trade_tolerance, trade_values_for_partner
 
     partner_in, partner_out = trade_values_for_partner(
@@ -157,7 +175,14 @@ def cpu_accepts_trade(season, user_team_id, partner_team_id, outgoing_players, o
         incoming_picks,
     )
     tolerance = partner_trade_tolerance(season, partner_team_id)
-    return abs(partner_out - partner_in) <= tolerance
+    partner_net = partner_in - partner_out
+    if not partner_would_consider_trade(partner_net, tolerance):
+        return False
+    if partner_net > tolerance:
+        rng = rng or random.Random()
+        if rng.random() < VERY_APPEALING_REJECTION_CHANCE:
+            return False
+    return True
 
 
 def _meter_label(partner_net, has_assets, tolerance=TRADE_TOLERANCE):
@@ -195,13 +220,14 @@ def evaluate_trade(
     )
     tolerance = partner_trade_tolerance(season, partner_team_id)
     partner_net = round(partner_in - partner_out, 1)
-    would_accept = has_assets and abs(partner_net) <= tolerance
+    would_accept = has_assets and partner_would_consider_trade(partner_net, tolerance)
     meter = 50 if not has_assets else round(max(0, min(100, 50 + partner_net * 2)))
 
     return {
         "partner_in": round(partner_in, 1),
         "partner_out": round(partner_out, 1),
         "partner_net": partner_net,
+        "tolerance": tolerance,
         "would_accept": would_accept,
         "meter": meter,
         "label": _meter_label(partner_net, has_assets, tolerance),
@@ -218,12 +244,16 @@ def execute_trade(
     incoming_players,
     incoming_picks,
 ):
+    from roster import repair_roster_sync
+
+    repair_roster_sync(season, user_team_id)
+    repair_roster_sync(season, partner_team_id)
     lookup = league_lookup(season)
     partner_size = roster_size(season, partner_team_id)
     partner_after = partner_size - len(incoming_players) + len(outgoing_players)
     released_names = []
-    if partner_after > 15:
-        overflow = partner_after - 15
+    if partner_after > MAX_ROSTER:
+        overflow = partner_after - MAX_ROSTER
         release_count = max(2, overflow) if overflow >= 2 else overflow
         released = release_worst_players(season, partner_team_id, release_count, lookup)
         released_names = [player.get("name", player["id"]) for player in released]

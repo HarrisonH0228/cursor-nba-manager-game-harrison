@@ -9,6 +9,8 @@ from contracts import propose_offer
 from ratings import apply_ratings
 from roster import (
     MAX_ROSTER,
+    MIN_ROSTER,
+    release_player,
     reconcile_all_rosters,
     reconcile_team_roster,
     release_player,
@@ -60,6 +62,8 @@ class RosterSyncTests(unittest.TestCase):
         partner_player = self.lookup[self.season["rosters"][str(partner_team)][0]]
         user_player["salary"] = 8.0
         partner_player["salary"] = 8.0
+        user_size_before = roster_size(self.season, user_team)
+        partner_size_before = roster_size(self.season, partner_team)
         execute_trade(
             self.season,
             user_team,
@@ -73,7 +77,37 @@ class RosterSyncTests(unittest.TestCase):
         self.assertIn(user_player["id"], self.season["rosters"][str(partner_team)])
         self.assertEqual(self.lookup[partner_player["id"]]["team_id"], user_team)
         self.assertEqual(self.lookup[user_player["id"]]["team_id"], partner_team)
-        self.assertEqual(roster_size(self.season, user_team), roster_size(self.season, partner_team))
+        self.assertEqual(roster_size(self.season, user_team), user_size_before)
+        self.assertEqual(roster_size(self.season, partner_team), partner_size_before)
+
+    def test_trade_allows_partner_below_min(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+        while roster_size(self.season, partner_team) > MIN_ROSTER:
+            pid = self.season["rosters"][str(partner_team)][-1]
+            release_player(self.season, partner_team, pid, force=True)
+        self.assertEqual(roster_size(self.season, partner_team), MIN_ROSTER)
+        partner_roster = self.season["rosters"][str(partner_team)]
+
+        incoming = [
+            self.lookup[partner_roster[0]]["id"],
+            self.lookup[partner_roster[1]]["id"],
+        ]
+        outgoing = [self.lookup[self.season["rosters"][str(user_team)][0]]["id"]]
+        for pid in incoming + outgoing:
+            self.lookup[pid]["salary"] = 5.0
+
+        ok, message = execute_trade(
+            self.season,
+            user_team,
+            partner_team,
+            outgoing,
+            [],
+            incoming,
+            [],
+        )
+        self.assertTrue(ok, message)
+        self.assertEqual(roster_size(self.season, partner_team), MIN_ROSTER - 1)
 
     def test_signing_reconciles_roster(self):
         team_id = int(next(iter(self.season["rosters"])))

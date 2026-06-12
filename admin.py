@@ -16,7 +16,7 @@ from attributes import (
     init_rookie_career_profile,
     refresh_player_from_attributes,
 )
-from contracts import assign_player_contract, refresh_all_team_finances
+from contracts import assign_player_contract, ensure_contract_fields, refresh_all_team_finances
 from draft import generate_rookie_profile
 from game import get_game, load_session_season, save_session_season
 from names import ensure_unique_name
@@ -27,6 +27,7 @@ from roster import (
     reconcile_team_roster,
     release_player,
     roster_size,
+    two_way_players,
 )
 from season import allocate_player_id, league_lookup, refresh_all_roster_stats, roster_players, team_name
 
@@ -536,13 +537,20 @@ def admin_team_roster(team_id):
                 )
                 flash(message, "success" if ok else "error")
         reconcile_team_roster(season_data, team_id)
+        ensure_contract_fields(season_data)
         refresh_all_roster_stats(season_data, lookup)
         refresh_all_team_finances(season_data, lookup)
         save_session_season(season_id, season_data)
         return redirect(url_for("admin.admin_team_roster", team_id=team_id))
 
+    ensure_contract_fields(season_data)
     roster = roster_players(season_data, team_id, lookup)
     roster.sort(key=lambda p: p.get("overall") or 0, reverse=True)
+    g_league_roster = sorted(
+        two_way_players(season_data, team_id, lookup),
+        key=lambda p: p.get("overall") or 0,
+        reverse=True,
+    )
     free_agents = sorted(
         free_agent_players(season_data, lookup),
         key=lambda p: p.get("overall") or 0,
@@ -557,6 +565,7 @@ def admin_team_roster(team_id):
         team_id=team_id,
         team_name=team_name(season_data, team_id),
         roster=roster,
+        g_league_roster=g_league_roster,
         free_agents=free_agents,
         record=f"{record.get('w', 0)}-{record.get('l', 0)}",
         roster_size=len(roster),

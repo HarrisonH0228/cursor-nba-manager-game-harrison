@@ -3,8 +3,10 @@
 from names import dedupe_all_player_names
 from season import can_trade, league_lookup, team_name
 
-MAX_ROSTER = 15
+MAX_ROSTER = 20
 MIN_ROSTER = 10
+MAX_TWO_WAY = 2
+MAX_G_LEAGUE_AGE = 26
 
 
 def _normalize_team_id(team_id):
@@ -24,8 +26,38 @@ def roster_size(season, team_id):
     return len(season.get("rosters", {}).get(str(team_id), []))
 
 
+def effective_roster_size(season, team_id):
+    """NBA roster count (excludes two-way assignments)."""
+    return roster_size(season, team_id)
+
+
+def two_way_count(season, team_id):
+    return len(two_way_player_ids(season, team_id))
+
+
+def two_way_player_ids(season, team_id):
+    return [
+        int(player_id)
+        for player_id in season.get("two_way_assignments", {}).get(str(team_id), [])
+    ]
+
+
+def two_way_players(season, team_id, lookup=None):
+    lookup = lookup or league_lookup(season)
+    players = []
+    for player_id in two_way_player_ids(season, team_id):
+        player = lookup.get(player_id)
+        if player:
+            players.append(player)
+    return players
+
+
 def can_add_player(season, team_id):
-    return roster_size(season, team_id) < MAX_ROSTER
+    return effective_roster_size(season, team_id) < MAX_ROSTER
+
+
+def can_assign_two_way(season, team_id):
+    return two_way_count(season, team_id) < MAX_TWO_WAY
 
 
 def can_remove_player(season, team_id):
@@ -53,6 +85,7 @@ def validate_roster_sizes_after_trade(
     outgoing_players,
     incoming_players,
     check_partner_max=True,
+    check_partner_min=True,
 ):
     user_size = roster_size(season, user_team_id)
     partner_size = roster_size(season, partner_team_id)
@@ -65,7 +98,7 @@ def validate_roster_sizes_after_trade(
         return False, "Trade would exceed partner roster limit."
     if user_after < MIN_ROSTER:
         return False, f"Trade would drop below minimum roster ({MIN_ROSTER} players)."
-    if partner_after < MIN_ROSTER:
+    if check_partner_min and partner_after < MIN_ROSTER:
         return False, "Trade would drop partner below minimum roster."
     return True, None
 
@@ -171,6 +204,9 @@ def release_player(season, team_id, player_id, force=False):
 
     player["team_id"] = None
     player["team"] = "Free Agent"
+    player["unsigned_seasons"] = 0
+    player.pop("two_way", None)
+    _remove_from_two_way(season, team_id, player_id)
     try:
         from contracts import compute_asking_salary, refresh_all_team_finances
         player["asking_salary"] = compute_asking_salary(player)
@@ -180,6 +216,79 @@ def release_player(season, team_id, player_id, force=False):
     _sync_free_agents(season)
     reconcile_team_roster(season, team_id)
     return True, f"Released {player.get('name', player_id)} to free agency."
+
+
+def _remove_from_two_way(season, team_id, player_id):
+    assignments = season.setdefault("two_way_assignments", {})
+    roster_key = str(_normalize_team_id(team_id))
+    ids = [int(pid) for pid in assignments.get(roster_key, [])]
+    player_id = int(player_id)
+    if player_id in ids:
+        ids.remove(player_id)
+    assignments[roster_key] = ids
+
+
+def assign_to_g_league(season, team_id, player_id):
+    if not can_trade(season):
+        return False, "Roster moves are not available in this phase."
+
+    team_id = _normalize_team_id(team_id)
+    player_id = int(player_id)
+    lookup = league_lookup(season)
+    player = lookup.get(player_id)
+    roster_list = [int(pid) for pid in season.get("rosters", {}).get(str(team_id), [])]
+
+    if not player or player_id not in roster_list:
+        return False, "Player is not on your NBA roster."
+    if int(player.get("age") or 99) > MAX_G_LEAGUE_AGE:
+        return False, f"Only players age {MAX_G_LEAGUE_AGE} or younger can be sent to the G-League."
+    if not can_assign_two_way(season, team_id):
+        return False, f"Two-way limit reached ({MAX_TWO_WAY} players)."
+
+    roster_list.remove(player_id)
+    season["rosters"][str(team_id)] = roster_list
+    tw_ids = season.setdefault("two_way_assignments", {}).setdefault(str(team_id), [])
+    if player_id not in tw_ids:
+        tw_ids.append(player_id)
+    player["two_way"] = True
+    try:
+        from contracts import refresh_all_team_finances
+        refresh_all_team_finances(season)
+    except ImportError:
+        pass
+    return True, f"Sent {player.get('name', player_id)} to the G-League."
+
+
+def recall_from_g_league(season, team_id, player_id):
+    if not can_trade(season):
+        return False, "Roster moves are not available in this phase."
+
+    team_id = _normalize_team_id(team_id)
+    player_id = int(player_id)
+    lookup = league_lookup(season)
+    player = lookup.get(player_id)
+    tw_ids = [int(pid) for pid in season.get("two_way_assignments", {}).get(str(team_id), [])]
+
+    if not player or player_id not in tw_ids:
+        return False, "Player is not on your G-League assignment."
+    if not can_add_player(season, team_id):
+        return False, f"NBA roster is full ({MAX_ROSTER} players). Recall someone else first."
+
+    tw_ids.remove(player_id)
+    season["two_way_assignments"][str(team_id)] = tw_ids
+    player.pop("two_way", None)
+    roster = season["rosters"].setdefault(str(team_id), [])
+    if player_id not in roster:
+        roster.append(player_id)
+    player["team_id"] = team_id
+    player["team"] = team_name(season, team_id)
+    reconcile_team_roster(season, team_id)
+    try:
+        from contracts import refresh_all_team_finances
+        refresh_all_team_finances(season)
+    except ImportError:
+        pass
+    return True, f"Recalled {player.get('name', player_id)} to the NBA roster."
 
 
 def assign_player_to_team(season, player_id, new_team_id, *, force=False):
@@ -213,6 +322,10 @@ def assign_player_to_team(season, player_id, new_team_id, *, force=False):
     if new_team_id is None:
         player["team_id"] = None
         player["team"] = "Free Agent"
+        player["unsigned_seasons"] = 0
+        player.pop("two_way", None)
+        if current_team_id is not None:
+            _remove_from_two_way(season, current_team_id, player_id)
         try:
             from contracts import compute_asking_salary, refresh_all_team_finances
 

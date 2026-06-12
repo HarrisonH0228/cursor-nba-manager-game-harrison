@@ -36,8 +36,18 @@ from season import (
     sim_week,
     simulate_all_playoffs,
 )
-from trade import cpu_accepts_trade, evaluate_trade, execute_trade, validate_trade
-from roster import MAX_ROSTER, MIN_ROSTER, release_player, roster_size, sign_free_agent
+from trade import TRADE_TOLERANCE, cpu_accepts_trade, evaluate_trade, execute_trade, validate_trade
+from roster import (
+    MAX_ROSTER,
+    MAX_TWO_WAY,
+    MIN_ROSTER,
+    assign_to_g_league,
+    recall_from_g_league,
+    release_player,
+    roster_size,
+    sign_free_agent,
+    two_way_count,
+)
 
 
 class OffseasonTests(unittest.TestCase):
@@ -193,27 +203,98 @@ class OffseasonTests(unittest.TestCase):
                 break
 
         self.assertTrue(preview["would_accept"], "Expected a near-even trade to be accepted")
-        self.assertLessEqual(abs(preview["partner_net"]), 15)
+        self.assertGreaterEqual(preview["partner_net"], -TRADE_TOLERANCE)
         self.assertLessEqual(abs(preview["meter"] - 50), 30)
+
+        class _FixedRng:
+            def __init__(self, value):
+                self._value = value
+
+            def random(self):
+                return self._value
+
         self.assertEqual(
             preview["would_accept"],
             cpu_accepts_trade(
-                self.season, user_team, partner_team, even_out, [], even_in, []
+                self.season,
+                user_team,
+                partner_team,
+                even_out,
+                [],
+                even_in,
+                [],
+                rng=_FixedRng(1.0),
             ),
         )
 
-        lopsided_out = [user_players[0]["id"]]
-        lopsided_in = [partner_players[-1]["id"]]
+        lopsided_out = [user_players[-1]["id"]]
+        lopsided_in = [partner_players[0]["id"]]
         lopsided = evaluate_trade(
             self.season, user_team, partner_team, lopsided_out, [], lopsided_in, []
         )
         self.assertFalse(lopsided["would_accept"])
-        self.assertTrue(lopsided["meter"] >= 65 or lopsided["meter"] <= 35)
+        self.assertLess(lopsided["partner_net"], -TRADE_TOLERANCE)
         self.assertEqual(
             lopsided["would_accept"],
             cpu_accepts_trade(
                 self.season, user_team, partner_team, lopsided_out, [], lopsided_in, []
             ),
+        )
+
+    def test_very_appealing_trade_acceptance(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+        lookup = league_lookup(self.season)
+        user_players = sorted(
+            [lookup[pid] for pid in self.season["rosters"][str(user_team)]],
+            key=lambda player: player.get("overall") or 0,
+            reverse=True,
+        )
+        partner_players = sorted(
+            [lookup[pid] for pid in self.season["rosters"][str(partner_team)]],
+            key=lambda player: player.get("overall") or 0,
+            reverse=True,
+        )
+
+        appealing_out = [user_players[0]["id"]]
+        appealing_in = [partner_players[-1]["id"]]
+        preview = evaluate_trade(
+            self.season, user_team, partner_team, appealing_out, [], appealing_in, []
+        )
+        self.assertTrue(preview["would_accept"])
+        self.assertEqual(preview["label"], "Very appealing")
+        self.assertGreater(preview["partner_net"], preview["tolerance"])
+
+        class _FixedRng:
+            def __init__(self, value):
+                self._value = value
+
+            def random(self):
+                return self._value
+
+        self.assertTrue(
+            cpu_accepts_trade(
+                self.season,
+                user_team,
+                partner_team,
+                appealing_out,
+                [],
+                appealing_in,
+                [],
+                rng=_FixedRng(1.0),
+            )
+        )
+        self.assertFalse(
+            cpu_accepts_trade(
+                self.season,
+                user_team,
+                partner_team,
+                appealing_out,
+                [],
+                appealing_in,
+                [],
+                rng=_FixedRng(0.0),
+            )
         )
 
     def test_draft_talent_curve(self):
@@ -334,6 +415,15 @@ class OffseasonTests(unittest.TestCase):
         self.assertIsNotNone(bracket["finals"])
         self.assertTrue(
             bracket["east_rounds"][1]["series"][0]["series"].get("placeholder")
+        )
+        east_qf0 = bracket["east_rounds"][0]["series"][0]
+        west_qf0 = bracket["west_rounds"][0]["series"][0]
+        self.assertEqual(east_qf0["global_series_idx"], 0)
+        self.assertEqual(west_qf0["global_series_idx"], 4)
+        playoffs = self.season["playoffs"]["rounds"][0]["series"]
+        self.assertIs(
+            west_qf0["series"],
+            playoffs[west_qf0["global_series_idx"]],
         )
 
     def test_trade_with_string_team_id(self):
@@ -679,6 +769,53 @@ class OffseasonTests(unittest.TestCase):
         )
         self.assertTrue(ok, message)
         self.assertLessEqual(roster_size(self.season, partner_team), MAX_ROSTER)
+
+    def test_g_league_assign_and_recall(self):
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        player_id = self.season["rosters"][str(user_team)][0]
+        player = lookup[player_id]
+        player["age"] = 22
+        nba_size_before = roster_size(self.season, user_team)
+
+        ok, message = assign_to_g_league(self.season, user_team, player_id)
+        self.assertTrue(ok, message)
+        self.assertEqual(roster_size(self.season, user_team), nba_size_before - 1)
+        self.assertEqual(two_way_count(self.season, user_team), 1)
+        self.assertTrue(player.get("two_way"))
+
+        ok, message = recall_from_g_league(self.season, user_team, player_id)
+        self.assertTrue(ok, message)
+        self.assertEqual(roster_size(self.season, user_team), nba_size_before)
+        self.assertEqual(two_way_count(self.season, user_team), 0)
+
+    def test_g_league_two_way_limit(self):
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        roster = self.season["rosters"][str(user_team)]
+        for index in range(MAX_TWO_WAY):
+            player = lookup[roster[index]]
+            player["age"] = 21
+            ok, _ = assign_to_g_league(self.season, user_team, player["id"])
+            self.assertTrue(ok)
+        ok, message = assign_to_g_league(self.season, user_team, roster[MAX_TWO_WAY])
+        self.assertFalse(ok)
+        self.assertIn(str(MAX_TWO_WAY), message)
+
+    def test_signing_resets_unsigned_seasons(self):
+        from contracts import propose_offer
+
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        while roster_size(self.season, user_team) >= MAX_ROSTER:
+            release_player(self.season, user_team, self.season["rosters"][str(user_team)][-1], force=True)
+        fa_id = self.season["free_agents"][0]
+        fa = lookup[fa_id]
+        fa["unsigned_seasons"] = 2
+        ask = float(fa.get("asking_salary") or 5)
+        ok, _, accepted = propose_offer(self.season, user_team, fa_id, ask * 1.2, 2)
+        self.assertTrue(ok and accepted)
+        self.assertNotIn("unsigned_seasons", fa)
 
 
 if __name__ == "__main__":
