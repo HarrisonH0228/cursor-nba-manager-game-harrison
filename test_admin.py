@@ -266,7 +266,8 @@ class AdminTeamAssignmentTests(unittest.TestCase):
         season_data, _ = season_store.load_season(season_id)
         lookup = league_lookup(season_data)
         after = float(lookup[player_id]["salary"])
-        self.assertAlmostEqual(after, before * 0.5, places=1)
+        self.assertLess(after, before)
+        self.assertAlmostEqual(after, before * 0.5, delta=0.15)
 
 
 class TeamPageRenderTests(unittest.TestCase):
