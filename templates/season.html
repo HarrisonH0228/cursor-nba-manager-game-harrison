@@ -39,6 +39,7 @@
 {% set series = entry.series %}
 {% set is_placeholder = series.get('placeholder') %}
 {% set is_user_series = not is_placeholder and user_team_id and (series.high_seed_id == user_team_id or series.low_seed_id == user_team_id) %}
+{% set show_games = is_user_series or (series.games and not is_placeholder) %}
 {% set series_key = (conference or entry.conference or 'Finals') ~ '-' ~ entry.round_idx ~ '-' ~ entry.series_idx %}
 {% set box_series_idx = entry.global_series_idx if entry.global_series_idx is defined else entry.series_idx %}
 <div class="bracket-series{% if is_user_series %} user-series{% endif %}{% if is_placeholder %} bracket-series-placeholder{% endif %}{% if is_finals %} bracket-series-finals{% endif %}{% if entry.grid_col is defined %} bracket-col-{{ entry.grid_col }}{% endif %}" data-series-key="{{ series_key }}">
@@ -60,11 +61,11 @@
   <div class="bracket-games-wrap">
     <button type="button" class="bracket-games-toggle collapse-toggle-btn"
             data-series-key="{{ series_key }}"
-            aria-expanded="{{ 'true' if is_user_series else 'false' }}"
+            aria-expanded="{{ 'true' if show_games else 'false' }}"
             aria-controls="bracket-games-{{ series_key }}">
-      Games ({{ series.games|length }}) <span class="bracket-toggle-icon">{{ '−' if is_user_series else '+' }}</span>
+      Games ({{ series.games|length }}) <span class="bracket-toggle-icon">{{ '−' if show_games else '+' }}</span>
     </button>
-    <div class="bracket-games" id="bracket-games-{{ series_key }}"{% if not is_user_series %} hidden{% endif %}>
+    <div class="bracket-games" id="bracket-games-{{ series_key }}"{% if not show_games %} hidden{% endif %}>
       {% for game in series.games %}
       <a href="{{ url_for('season_playoff_box_score', round_idx=entry.round_idx, series_idx=box_series_idx, game_idx=loop.index0) }}"
          class="bracket-game-link{% if user_team_id and (game.home_id == user_team_id or game.away_id == user_team_id) %} bracket-game-user{% endif %}">
@@ -91,6 +92,7 @@
     <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
       <span class="badge-nba badge-nba-gray">{{ season.season_year }}</span>
       <span class="badge-nba badge-nba-blue">{{ season.phase|replace('_',' ')|title }}</span>
+      {% if difficulty_label %}<span class="badge-nba badge-nba-gray">{{ difficulty_label }}</span>{% endif %}
       {% if season.phase == 'regular' %}
       <span style="color:var(--text-muted);font-size:.8rem;">Day {{ season.current_day }} / {{ season.max_day }} · {{ games_played }} / {{ season.schedule|length }} games</span>
       {% endif %}

@@ -8,9 +8,23 @@
   </p>
   <div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;">
     <a href="{{ url_for('index') }}" class="btn-nba-secondary btn-nba-sm">Back</a>
-    <form method="post" action="{{ url_for('start') }}">
+    <form method="post" action="{{ url_for('start') }}" id="roll-team-form">
+      <input type="hidden" name="difficulty" id="roll-difficulty" value="normal">
       <button type="submit" class="btn-nba-secondary btn-nba-sm">Roll instead</button>
     </form>
+  </div>
+</div>
+
+<div class="difficulty-picker glass-liquid mb-4">
+  <p class="section-title mb-2">Difficulty</p>
+  <div class="difficulty-options" role="radiogroup" aria-label="Game difficulty">
+    {% for level in difficulty_levels %}
+    <label class="difficulty-option{% if level == 'normal' %} difficulty-option-active{% endif %}">
+      <input type="radio" name="difficulty_choice" value="{{ level }}"{% if level == 'normal' %} checked{% endif %}>
+      <span class="difficulty-option-label">{{ difficulty_labels[level] }}</span>
+      <span class="difficulty-option-desc">{{ difficulty_descriptions[level] }}</span>
+    </label>
+    {% endfor %}
   </div>
 </div>
 
@@ -18,6 +32,7 @@
   {% for team in teams %}
   <form method="post" action="{{ url_for('start_pick') }}" class="team-picker-form">
     <input type="hidden" name="team_id" value="{{ team.id }}">
+    <input type="hidden" name="difficulty" class="team-difficulty-input" value="normal">
     <button type="submit" class="team-picker-card" aria-label="Select {{ team.full_name }}">
       <img
         class="team-logo-lg"
@@ -31,4 +46,28 @@
   </form>
   {% endfor %}
 </div>
+
+<script>
+(function () {
+  var radios = document.querySelectorAll('input[name="difficulty_choice"]');
+  var rollInput = document.getElementById('roll-difficulty');
+  var teamInputs = document.querySelectorAll('.team-difficulty-input');
+  var options = document.querySelectorAll('.difficulty-option');
+
+  function syncDifficulty(value) {
+    if (rollInput) rollInput.value = value;
+    teamInputs.forEach(function (input) { input.value = value; });
+    options.forEach(function (option) {
+      var radio = option.querySelector('input[type="radio"]');
+      option.classList.toggle('difficulty-option-active', radio && radio.value === value);
+    });
+  }
+
+  radios.forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      if (radio.checked) syncDifficulty(radio.value);
+    });
+  });
+})();
+</script>
 {% endblock %}

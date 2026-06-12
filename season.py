@@ -12,6 +12,7 @@ from attributes import (
     needs_attributes,
     refresh_team_roster_stats,
 )
+from difficulty import get_difficulty_settings
 from names import dedupe_all_player_names
 from ratings import compute_team_overall
 from simulation import simulate_game, simulate_game_with_box_score
@@ -211,8 +212,12 @@ def can_trade(season):
     return False
 
 
-def init_season(players, season_year=2026, rng=None):
+def init_season(players, season_year=2026, rng=None, difficulty="normal"):
     rng = rng or random.Random()
+    from difficulty import get_difficulty_settings, normalize_difficulty
+
+    difficulty = normalize_difficulty(difficulty)
+    difficulty_settings = get_difficulty_settings({"difficulty": difficulty})
 
     if needs_attributes(players):
         apply_attributes(players)
@@ -267,8 +272,9 @@ def init_season(players, season_year=2026, rng=None):
         "injury_week_counts": {},
         "pending_notifications": [],
         "championships": {},
-        "gm_personalities_enabled": False,
+        "gm_personalities_enabled": difficulty_settings["gm_personalities_from_start"],
         "gm_profiles": {},
+        "difficulty": difficulty,
         "contract_alerts": [],
         "pending_championship_bonus": None,
     }
@@ -281,6 +287,10 @@ def init_season(players, season_year=2026, rng=None):
     from contracts import assign_initial_contracts
 
     assign_initial_contracts(season, rng)
+    if difficulty_settings["gm_personalities_from_start"]:
+        from gm_personalities import reroll_gm_personalities
+
+        reroll_gm_personalities(season, rng)
     return season
 
 
@@ -811,6 +821,7 @@ def _play_game(season, game, lookup, rng, user_team_id=None):
         away_team_gp=away_gp,
         home_exclude_ids=home_exclude,
         away_exclude_ids=away_exclude,
+        difficulty_settings=get_difficulty_settings(season),
     )
     _record_result(season, game, result)
 
@@ -1077,10 +1088,10 @@ def _placeholder_series(conference):
 
 def _global_series_idx(conference, round_idx, local_idx):
     """Map conference-local series index to flat rounds[round_idx]['series'] index."""
-    base = sum(EAST_SERIES_PER_ROUND[:round_idx])
-    if conference == "West":
-        base += EAST_SERIES_PER_ROUND[round_idx]
-    return base + local_idx
+    east_count = BRACKET_SERIES_COUNTS[round_idx]
+    if conference == "East":
+        return local_idx
+    return east_count + local_idx
 
 
 def _bracket_entry(series, round_idx, series_idx, conference, slot_index):
@@ -1165,6 +1176,7 @@ def playoff_bracket_context(season):
                     "series": series,
                     "round_idx": round_idx,
                     "series_idx": series_idx,
+                    "global_series_idx": series_idx,
                     "high_seed_label": None,
                     "low_seed_label": None,
                 }
@@ -1181,6 +1193,7 @@ def playoff_bracket_context(season):
                     "series": placeholder,
                     "round_idx": 3,
                     "series_idx": 0,
+                    "global_series_idx": 0,
                     "high_seed_label": None,
                     "low_seed_label": None,
                 }
@@ -1224,6 +1237,7 @@ def _simulate_series(series, season, lookup, rng, user_team_id=None):
             away_team_gp=away_gp,
             home_exclude_ids=home_exclude,
             away_exclude_ids=away_exclude,
+            difficulty_settings=get_difficulty_settings(season),
         )
         if result["home_score"] > result["away_score"]:
             series["high_wins"] += 1

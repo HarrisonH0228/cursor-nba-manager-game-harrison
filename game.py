@@ -2,6 +2,7 @@ import random
 
 from flask import redirect, session, url_for
 
+from difficulty import normalize_difficulty
 from fetcher import fetch_team, fetch_teams
 import season_store
 
@@ -10,6 +11,7 @@ SESSION_TEAM_ID = "team_id"
 SESSION_TEAM_NAME = "team_name"
 SESSION_SEASON_ID = "season_id"
 SESSION_SEASON_RECOVERY = "season_recovery"
+SESSION_DIFFICULTY = "difficulty"
 
 
 def get_game(current_session=None):
@@ -21,6 +23,7 @@ def get_game(current_session=None):
         "started": True,
         "team_id": current_session.get(SESSION_TEAM_ID),
         "team_name": current_session.get(SESSION_TEAM_NAME),
+        "difficulty": normalize_difficulty(current_session.get(SESSION_DIFFICULTY)),
     }
 
 
@@ -61,7 +64,7 @@ def save_session_season(season_id, season_data, current_session=None):
     set_season_id(season_id, current_session)
 
 
-def start_game(current_session=None, team_id=None):
+def start_game(current_session=None, team_id=None, difficulty=None):
     current_session = current_session if current_session is not None else session
     if team_id is not None:
         team = fetch_team(team_id)
@@ -72,6 +75,7 @@ def start_game(current_session=None, team_id=None):
     current_session[SESSION_GAME_STARTED] = True
     current_session[SESSION_TEAM_ID] = team["id"]
     current_session[SESSION_TEAM_NAME] = team["full_name"]
+    current_session[SESSION_DIFFICULTY] = normalize_difficulty(difficulty)
     return team
 
 
@@ -83,6 +87,7 @@ def clear_game(current_session=None):
     current_session.pop(SESSION_GAME_STARTED, None)
     current_session.pop(SESSION_TEAM_ID, None)
     current_session.pop(SESSION_TEAM_NAME, None)
+    current_session.pop(SESSION_DIFFICULTY, None)
 
 
 def require_game():

@@ -426,6 +426,56 @@ class OffseasonTests(unittest.TestCase):
             playoffs[west_qf0["global_series_idx"]],
         )
 
+    def test_playoff_bracket_global_series_idx_semifinals(self):
+        lookup = league_lookup(self.season)
+        sim_rest_of_season(self.season, lookup, rng=self.rng)
+        seed_playoffs(self.season, lookup)
+        while self.season["playoffs"]["round_index"] == 0:
+            played = advance_playoff_round(self.season, lookup, rng=self.rng)
+            if played == 0:
+                break
+
+        bracket = playoff_bracket_context(self.season)
+        east_sf0 = bracket["east_rounds"][1]["series"][0]
+        west_sf0 = bracket["west_rounds"][1]["series"][0]
+        self.assertEqual(east_sf0["global_series_idx"], 0)
+        self.assertEqual(west_sf0["global_series_idx"], 2)
+        semifinals = self.season["playoffs"]["rounds"][1]["series"]
+        self.assertIs(east_sf0["series"], semifinals[0])
+        self.assertIs(west_sf0["series"], semifinals[2])
+
+    def test_cpu_signs_star_free_agents_on_legend(self):
+        from contracts import sim_cpu_free_agency
+
+        lookup = league_lookup(self.season)
+        self.season["difficulty"] = "legend"
+        self.season["phase"] = "offseason"
+        for player in self.season["players"].values():
+            if player.get("team_id"):
+                player["salary"] = 3.0
+        star_id = self.season["next_player_id"]
+        self.season["next_player_id"] += 1
+        star = {
+            "id": star_id,
+            "name": "Test Star FA",
+            "overall": 88,
+            "age": 29,
+            "team_id": None,
+            "asking_salary": 20.0,
+            "previous_salary": 18.0,
+            "position": "SF",
+            "gp": 0,
+            "season_gp": 0,
+        }
+        self.season["players"][str(star_id)] = star
+        self.season["free_agents"].append(star_id)
+
+        signed = sim_cpu_free_agency(self.season, rng=random.Random(99))
+        signed_ids = {player["id"] for player, _team in signed}
+        self.assertIn(star_id, signed_ids)
+        lookup = league_lookup(self.season)
+        self.assertIsNotNone(lookup[star_id].get("team_id"))
+
     def test_trade_with_string_team_id(self):
         lookup = league_lookup(self.season)
         user_team = int(next(iter(self.season["rosters"])))

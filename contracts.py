@@ -659,51 +659,105 @@ def validate_trade_cap(season, user_team_id, outgoing_players, incoming_players,
     return False, f"Trade would exceed cap space by ${round(needed, 1)}M (max exception ${TRADE_SALARY_TOLERANCE_M}M)."
 
 
-def sim_cpu_free_agency(season, rng=None, max_signings=8):
+def sim_cpu_free_agency(season, rng=None, max_signings=None):
     """CPU teams sign top free agents during offseason/draft."""
+    from difficulty import get_difficulty_settings
+    from gm_personalities import cpu_fa_offer_multiplier, cpu_fa_team_priority
+    from roster import _sync_free_agents, can_add_player
+
     rng = rng or random.Random()
     lookup = league_lookup(season)
-    free_agents = [
-        lookup[pid]
-        for pid in season.get("free_agents", [])
-        if pid in lookup and not lookup[pid].get("team_id")
-    ]
-    free_agents.sort(key=lambda p: p.get("overall") or 0, reverse=True)
+    settings = get_difficulty_settings(season)
+    if max_signings is None:
+        max_signings = settings["max_cpu_fa_signings"]
+
     signed = []
-    team_ids = [int(tid) for tid in season.get("rosters", {}).keys()]
+    signed_player_ids = set()
+    team_ids = list(season.get("rosters", {}).keys())
+    rng.shuffle(team_ids)
 
-    for player in free_agents[: max_signings * 3]:
-        if len(signed) >= max_signings:
-            break
-        ask = player.get("asking_salary") or compute_asking_salary(player)
-        candidates = []
-        for team_id in team_ids:
-            from roster import can_add_player
-            if not can_add_player(season, team_id):
-                continue
-            fin = team_finances(season, team_id, lookup)
-            if fin["cap_space"] < ask:
-                continue
-            candidates.append((team_id, fin["cap_space"]))
-        if not candidates:
-            continue
-        from gm_personalities import cpu_fa_offer_multiplier, cpu_fa_team_priority
-
-        candidates.sort(
-            key=lambda item: item[1] + cpu_fa_team_priority(season, item[0], player),
+    def available_free_agents():
+        return sorted(
+            [
+                lookup[pid]
+                for pid in season.get("free_agents", [])
+                if pid in lookup
+                and not lookup[pid].get("team_id")
+                and pid not in signed_player_ids
+            ],
+            key=lambda player: player.get("overall") or 0,
             reverse=True,
         )
-        team_id = rng.choice(candidates[:5])[0]
+
+    def try_sign(team_id, player):
+        ask = player.get("asking_salary") or compute_asking_salary(player)
+        finances = team_finances(season, team_id, lookup)
+        if finances["cap_space"] < ask * 0.85:
+            return False
+
+        overall = player.get("overall") or 50
         multiplier = cpu_fa_offer_multiplier(season, team_id, player)
+        if overall >= 80:
+            multiplier = max(multiplier, settings["cpu_star_offer_floor"])
+
         offer = min(
             ask * rng.uniform(multiplier - 0.02, multiplier + 0.04),
-            max_player_salary(player.get("overall") or 50),
+            max_player_salary(overall),
+            finances["cap_space"],
         )
         years = rng.randint(1, MAX_FA_YEARS)
         accepted, _ = evaluate_offer(player, offer, years, season, team_id)
-        if accepted:
-            _apply_signing(season, team_id, player, offer, years, lookup)
-            signed.append((player, team_id))
-    from roster import _sync_free_agents
+        if (
+            not accepted
+            and settings["cpu_fa_retry_stars"]
+            and overall >= 75
+        ):
+            retry_offer = min(
+                ask * max(multiplier, settings["cpu_star_offer_floor"]),
+                max_player_salary(overall),
+                finances["cap_space"],
+            )
+            accepted, _ = evaluate_offer(player, retry_offer, years, season, team_id)
+            if accepted:
+                offer = retry_offer
+
+        if not accepted:
+            return False
+
+        _apply_signing(season, team_id, player, offer, years, lookup)
+        signed_player_ids.add(player["id"])
+        signed.append((player, team_id))
+        return True
+
+    for team_id_str in team_ids:
+        if len(signed) >= max_signings:
+            break
+
+        team_id = int(team_id_str)
+        if not can_add_player(season, team_id):
+            continue
+
+        finances = team_finances(season, team_id, lookup)
+        if finances["cap_space"] < 1:
+            continue
+
+        free_agents = available_free_agents()
+        if not free_agents:
+            break
+
+        affordable = [
+            player
+            for player in free_agents[:40]
+            if (player.get("asking_salary") or compute_asking_salary(player))
+            <= finances["cap_space"]
+        ]
+        candidates = affordable or free_agents[:40]
+        player = max(
+            candidates,
+            key=lambda candidate: cpu_fa_team_priority(season, team_id, candidate)
+            + (candidate.get("overall") or 0) * 0.5,
+        )
+        try_sign(team_id, player)
+
     _sync_free_agents(season)
     return signed

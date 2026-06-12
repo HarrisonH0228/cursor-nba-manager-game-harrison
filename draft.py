@@ -293,7 +293,7 @@ def _assign_rookie(season, prospect, team_id, draft_round=1):
     reconcile_team_roster(season, team_id)
 
 
-def _advance_pick_state(season):
+def _advance_pick_state(season, rng=None):
     state = season.get("draft_state")
     if not state:
         return
@@ -302,6 +302,9 @@ def _advance_pick_state(season):
     if state["current_index"] >= len(state["queue"]):
         season["phase"] = "offseason"
         season["draft_state"] = None
+        from contracts import sim_cpu_free_agency
+
+        sim_cpu_free_agency(season, rng=rng or random.Random())
 
 
 def make_pick(season, team_id, prospect=None, rng=None, auto_trim=False):
@@ -383,7 +386,7 @@ def make_pick(season, team_id, prospect=None, rng=None, auto_trim=False):
         },
     )
     state["recent_picks"] = state["recent_picks"][:20]
-    _advance_pick_state(season)
+    _advance_pick_state(season, rng=rng)
 
     return True, f"Drafted {prospect['name']} (OVR {prospect['overall']})."
 

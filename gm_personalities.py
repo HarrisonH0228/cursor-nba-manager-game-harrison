@@ -2,6 +2,7 @@
 
 import random
 
+from difficulty import get_difficulty_settings
 from trade import TRADE_TOLERANCE
 
 ARCHETYPES = (
@@ -21,12 +22,21 @@ ARCHETYPE_LABELS = {
 }
 
 TOLERANCE_BY_ARCHETYPE = {
-    "cheap": 8,
-    "super_team_builder": 20,
-    "young_blood": 14,
-    "balanced": TRADE_TOLERANCE,
-    "vet_centric": 12,
+    "cheap": -7,
+    "super_team_builder": 5,
+    "young_blood": -1,
+    "balanced": 0,
+    "vet_centric": -3,
 }
+
+
+def _base_trade_tolerance(season):
+    return get_difficulty_settings(season)["trade_tolerance"]
+
+
+def _tolerance_for_archetype(season, archetype):
+    base = _base_trade_tolerance(season)
+    return base + TOLERANCE_BY_ARCHETYPE.get(archetype, 0)
 
 
 def personalities_enabled(season):
@@ -35,16 +45,18 @@ def personalities_enabled(season):
 
 def get_gm_profile(season, team_id):
     if not personalities_enabled(season):
-        return {"archetype": "balanced", "trade_tolerance": TRADE_TOLERANCE}
+        return {"archetype": "balanced", "trade_tolerance": _base_trade_tolerance(season)}
     profiles = season.get("gm_profiles") or {}
     profile = profiles.get(str(team_id))
     if not profile:
-        return {"archetype": "balanced", "trade_tolerance": TRADE_TOLERANCE}
+        return {"archetype": "balanced", "trade_tolerance": _base_trade_tolerance(season)}
     return profile
 
 
 def partner_trade_tolerance(season, partner_team_id):
-    return get_gm_profile(season, partner_team_id).get("trade_tolerance", TRADE_TOLERANCE)
+    return get_gm_profile(season, partner_team_id).get(
+        "trade_tolerance", _base_trade_tolerance(season)
+    )
 
 
 def archetype_label(archetype):
@@ -216,20 +228,29 @@ def cpu_fa_offer_multiplier(season, team_id, player):
 
 
 def cpu_fa_team_priority(season, team_id, player):
+    from contracts import _team_win_pct
+
+    priority = 0
+    settings = get_difficulty_settings(season)
+    win_pct = _team_win_pct(season, team_id)
+    if win_pct < 0.45:
+        priority += settings["weak_team_fa_boost"]
+
     if not personalities_enabled(season):
-        return 0
+        return priority
+
     archetype = get_gm_profile(season, team_id).get("archetype", "balanced")
     overall = player.get("overall") or 50
     age = player.get("age") or 25
     if archetype == "cheap" and overall >= 85:
-        return -20
+        return priority - 5
     if archetype == "super_team_builder" and overall >= 85:
-        return 15
+        return priority + 15
     if archetype == "young_blood" and age <= 26:
-        return 10
+        return priority + 10
     if archetype == "vet_centric" and age >= 28:
-        return 10
-    return 0
+        return priority + 10
+    return priority
 
 
 def reroll_gm_personalities(season, rng=None):
@@ -244,7 +265,7 @@ def reroll_gm_personalities(season, rng=None):
         archetype = rng.choice(ARCHETYPES)
         profiles[team_id_str] = {
             "archetype": archetype,
-            "trade_tolerance": TOLERANCE_BY_ARCHETYPE[archetype],
+            "trade_tolerance": _tolerance_for_archetype(season, archetype),
         }
     season["gm_profiles"] = profiles
     try:

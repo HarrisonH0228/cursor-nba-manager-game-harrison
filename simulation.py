@@ -49,10 +49,14 @@ def simulate_game_with_box_score(
     away_team_gp=None,
     home_exclude_ids=None,
     away_exclude_ids=None,
+    difficulty_settings=None,
 ):
     rng = rng or random.Random()
     home_exclude_ids = home_exclude_ids or set()
     away_exclude_ids = away_exclude_ids or set()
+    settings = difficulty_settings or {}
+    nudge_blend = settings.get("outcome_nudge_blend", OUTCOME_NUDGE_BLEND)
+    nudge_min_gap = settings.get("outcome_nudge_min_gap", OUTCOME_NUDGE_MIN_OVR_GAP)
 
     home_ovr = compute_team_overall(home_roster, team_gp=home_team_gp)
     away_ovr = compute_team_overall(away_roster, team_gp=away_team_gp)
@@ -95,9 +99,9 @@ def simulate_game_with_box_score(
     actual_home_win = home_score > away_score
     ovr_gap = abs((home_ovr or 50) - (away_ovr or 50))
 
-    if expected_home_win != actual_home_win and ovr_gap >= OUTCOME_NUDGE_MIN_OVR_GAP:
+    if expected_home_win != actual_home_win and ovr_gap >= nudge_min_gap:
         combined = home_score + away_score
-        shift = max(1, round(combined * OUTCOME_NUDGE_BLEND * 0.5))
+        shift = max(1, round(combined * nudge_blend * 0.5))
         if expected_home_win:
             home_score, away_score = _apply_score_adjustment(home_box, away_box, shift, -shift)
         else:

@@ -94,6 +94,20 @@ class CareerTests(unittest.TestCase):
         self.assertNotIn(str(target["id"]), season["players"])
         self.assertTrue(season.get("last_retirements"))
 
+    def test_elite_fa_departs_after_two_unsigned_seasons(self):
+        season = init_season(self.players, season_year=2026, rng=random.Random(7))
+        fa = next(iter(season["free_agents"]))
+        player = season["players"][str(fa)]
+        player["age"] = 28
+        player["overall"] = 85
+        player["unsigned_seasons"] = 2
+        player["retirement_age"] = 99
+
+        apply_season_aging(season, rng=random.Random(8))
+
+        self.assertNotIn(str(fa), season["players"])
+        self.assertTrue(season.get("last_departures"))
+
     def test_fa_player_departs_after_unsigned_seasons(self):
         season = init_season(self.players, season_year=2026, rng=random.Random(7))
         fa = next(iter(season["free_agents"]))

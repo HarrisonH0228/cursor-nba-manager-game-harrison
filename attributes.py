@@ -719,6 +719,10 @@ def _should_fa_depart(player):
     unsigned = int(player.get("unsigned_seasons") or 0)
     age = int(player.get("age") or 0)
     overall = int(player.get("overall") or 0)
+    if unsigned >= 2 and overall >= 80:
+        return True
+    if unsigned >= 3 and overall >= 70:
+        return True
     if unsigned >= 3 and age >= 32:
         return True
     if unsigned >= 2 and overall < 62:

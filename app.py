@@ -6,6 +6,13 @@ from flask import Flask, flash, jsonify, redirect, render_template, request, url
 from werkzeug.exceptions import HTTPException
 
 import cache
+from difficulty import (
+    DIFFICULTY_DESCRIPTIONS,
+    DIFFICULTY_LABELS,
+    DIFFICULTY_LEVELS,
+    difficulty_label,
+    normalize_difficulty,
+)
 from fetcher import fetch_teams, refresh_cache
 from game import (
     clear_game,
@@ -381,12 +388,15 @@ def choose_team():
         "choose_team.html",
         page_title="Choose Your Team",
         teams=teams,
+        difficulty_levels=DIFFICULTY_LEVELS,
+        difficulty_labels=DIFFICULTY_LABELS,
+        difficulty_descriptions=DIFFICULTY_DESCRIPTIONS,
     )
 
 
 @app.route("/start", methods=["POST"])
 def start():
-    team = start_game()
+    team = start_game(difficulty=_parse_difficulty())
     flash(f"You rolled the {team['full_name']}!")
     return redirect(url_for("team"))
 
@@ -404,7 +414,7 @@ def start_pick():
         flash("Select a valid team.", "error")
         return redirect(url_for("choose_team"))
 
-    team = start_game(team_id=team_id)
+    team = start_game(team_id=team_id, difficulty=_parse_difficulty())
     if team is None:
         flash("Could not start with that team. Try again.", "error")
         return redirect(url_for("choose_team"))
@@ -1126,6 +1136,13 @@ def _flash_championship_bonus(season_data):
     return False
 
 
+def _parse_difficulty():
+    value = request.form.get("difficulty", "normal")
+    if value in DIFFICULTY_LEVELS:
+        return value
+    return normalize_difficulty(value)
+
+
 def _render_season(season_id, season_data, lookup, game, page="hub", schedule_day=None):
     if _flash_championship_bonus(season_data):
         _save_season(season_id, season_data)
@@ -1165,6 +1182,9 @@ def _render_season(season_id, season_data, lookup, game, page="hub", schedule_da
         can_sim_regular=_can_sim_regular_season(season_data),
         expiring_contracts=expiring_contracts,
         max_fa_years=MAX_FA_YEARS,
+        difficulty_label=difficulty_label(
+            season_data.get("difficulty") if season_data else game.get("difficulty")
+        ),
     )
 
 
@@ -1194,7 +1214,12 @@ def season_start():
     season_id = season_store.create_season_id()
     season_year = cache_data.get("season") or 2026
     season_rng = random.Random(season_year)
-    season_data = init_season(all_players, season_year=season_year, rng=season_rng)
+    season_data = init_season(
+        all_players,
+        season_year=season_year,
+        rng=season_rng,
+        difficulty=game.get("difficulty", "normal"),
+    )
     season_data["user_team_id"] = game["team_id"]
     set_season_id(season_id)
     _save_season(season_id, season_data)
