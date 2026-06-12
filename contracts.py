@@ -85,6 +85,7 @@ def compute_asking_salary(player):
 
 
 def roll_initial_contract_years(player, rng=None):
+    """Roll contract length for non-staggered assignments (minimum 2 years)."""
     rng = rng or random.Random()
     overall = player.get("overall") or 50
     age = player.get("age") or 25
@@ -95,9 +96,9 @@ def roll_initial_contract_years(player, rng=None):
     elif overall >= 78:
         choices, weights = [2, 3, 4], [2, 3, 2]
     elif overall >= 68:
-        choices, weights = [1, 2, 3], [2, 3, 2]
+        choices, weights = [2, 3, 4], [1, 4, 3]
     else:
-        choices, weights = [1, 2], [3, 2]
+        choices, weights = [2, 3, 4], [1, 4, 3]
     if age <= 23:
         weights = [w + (1 if y >= 3 else 0) for w, y in zip(weights, choices)]
     elif age >= 34:
@@ -118,7 +119,7 @@ def assign_player_contract(player, years=None, salary=None):
     if salary is None:
         salary = market_salary(player)
     if years is None:
-        years = random.randint(1, 3)
+        years = random.randint(2, 3)
     player["salary"] = _round_salary(salary)
     player["contract_years"] = int(years)
     player.setdefault("previous_salary", player["salary"])
@@ -213,15 +214,32 @@ def _normalize_team_payrolls(season, lookup):
 def assign_initial_contracts(season, rng=None):
     rng = rng or random.Random()
     lookup = league_lookup(season)
-    for player in season.get("players", {}).values():
-        if player.get("team_id"):
-            years = roll_initial_contract_years(player, rng)
+    for team_id_str in season.get("rosters", {}):
+        roster_ids = list(season["rosters"][team_id_str])
+        short_count = min(len(roster_ids), rng.randint(2, 3))
+        bottom_half = sorted(
+            roster_ids,
+            key=lambda pid: lookup.get(int(pid), {}).get("overall") or 0,
+        )
+        short_pool = bottom_half[: max(short_count, len(bottom_half) // 2 + 1)]
+        short_ids = set(rng.sample(short_pool, short_count)) if short_count else set()
+        for player_id in roster_ids:
+            player = lookup.get(int(player_id))
+            if not player:
+                continue
+            if player_id in short_ids:
+                years = 2
+            else:
+                years = roll_initial_contract_years(player, rng)
+                if years < 3:
+                    years = 3 if (player.get("overall") or 0) < 78 else rng.choice([3, 4])
             salary = market_salary(player)
             overall = player.get("overall") or 50
             if overall >= 85 and years >= 3:
                 salary = _round_salary(salary * rng.uniform(1.03, 1.08))
             assign_player_contract(player, years=years, salary=salary)
-        else:
+    for player in season.get("players", {}).values():
+        if not player.get("team_id"):
             player["asking_salary"] = compute_asking_salary(player)
     _normalize_team_payrolls(season, lookup)
     refresh_all_team_finances(season, lookup)
@@ -237,6 +255,49 @@ def compute_extension_ask(player):
     elif overall >= 75:
         base = max(base, market * 1.06)
     return _round_salary(base)
+
+
+def suggested_extension_offer(player, season, team_id, lookup=None):
+    """Salary/years that meet the player's extension ask within cap space."""
+    lookup = lookup or league_lookup(season)
+    ask = compute_extension_ask(player)
+    current = float(player.get("salary") or 0)
+    overall = player.get("overall") or 50
+    finances = team_finances(season, team_id, lookup)
+    max_sal = max_player_salary(overall)
+    salary = _round_salary(min(max(ask, ask * 1.02), max_sal))
+    delta = salary - current
+    if delta > finances["cap_space"]:
+        salary = _round_salary(current + max(0.0, finances["cap_space"]))
+    if salary < ask:
+        salary = min(_round_salary(ask), max_sal)
+    years = 3 if overall >= 78 else 2
+    return {"salary": salary, "years": years, "ask": ask}
+
+
+def validate_extension_terms(player, salary, years, team_id, season, lookup=None):
+    """Pre-check extension offer before player evaluation."""
+    salary = _round_salary(float(salary))
+    years = int(years)
+    lookup = lookup or league_lookup(season)
+    finances = team_finances(season, team_id, lookup)
+    overall = player.get("overall") or 50
+    current = float(player.get("salary") or 0)
+
+    if years < 1 or years > MAX_FA_YEARS:
+        return False, f"Extensions must be 1–{MAX_FA_YEARS} years."
+    if salary < MIN_SALARY_M:
+        return False, f"Minimum salary is ${MIN_SALARY_M}M."
+    delta = salary - current
+    if delta > finances["cap_space"]:
+        return False, f"Extension exceeds cap space (${finances['cap_space']}M available)."
+    max_sal = max_player_salary(overall)
+    if salary > max_sal:
+        return False, f"Maximum offer for this player is ${max_sal}M/yr."
+    ask = compute_extension_ask(player)
+    if salary < ask * 0.95:
+        return False, f"Offer too low — player wants at least ${ask}M/yr."
+    return True, None
 
 
 def expiring_contract_report(season, user_team_id, lookup=None):
@@ -315,7 +376,7 @@ def propose_extension(season, team_id, player_id, salary, years):
     if delta > finances["cap_space"]:
         return False, f"Extension exceeds cap space (${finances['cap_space']}M available).", False
 
-    ok, message = validate_offer_terms(player, salary, years, team_id, season, lookup)
+    ok, message = validate_extension_terms(player, salary, years, team_id, season, lookup)
     if not ok:
         return False, message, False
 

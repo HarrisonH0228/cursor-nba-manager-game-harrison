@@ -104,6 +104,7 @@ from contracts import (
     min_acceptable_salary,
     propose_extension,
     propose_offer,
+    suggested_extension_offer,
     team_finances,
 )
 from news import news_headlines
@@ -445,6 +446,13 @@ def team():
     expiring_contracts = (
         expiring_contract_report(season_data, game["team_id"], lookup) if season_data else []
     )
+    extension_offers = {}
+    if season_data and lookup:
+        for player in roster:
+            if player.get("contract_years") is not None and int(player.get("contract_years") or 0) <= 1:
+                extension_offers[player["id"]] = suggested_extension_offer(
+                    player, season_data, game["team_id"], lookup
+                )
 
     def make_team_url(**overrides):
         params = {"sort": sort_key, "order": order}
@@ -469,6 +477,7 @@ def team():
         can_extend=season_data is not None and can_trade(season_data),
         can_g_league_moves=season_data is not None and can_trade(season_data),
         expiring_contracts=expiring_contracts,
+        extension_offers=extension_offers,
         max_fa_years=MAX_FA_YEARS,
         sort=sort_key,
         order=order,

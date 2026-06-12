@@ -14,6 +14,7 @@ from contracts import (
     compute_asking_salary,
     compute_extension_ask,
     ensure_contract_fields,
+    evaluate_extension,
     evaluate_offer,
     expiring_contract_report,
     expire_contracts,
@@ -21,7 +22,9 @@ from contracts import (
     propose_extension,
     propose_offer,
     roll_initial_contract_years,
+    suggested_extension_offer,
     team_finances,
+    validate_extension_terms,
     validate_offer_terms,
 )
 from ratings import apply_ratings
@@ -122,6 +125,48 @@ class ContractTests(unittest.TestCase):
             player = {"overall": 82, "age": 26}
             years_seen.add(roll_initial_contract_years(player, self.rng))
         self.assertTrue(all(2 <= y <= 4 for y in years_seen))
+
+    def _fresh_season(self):
+        cache_data = cache.load_cache()
+        players = list(cache_data.get("players", []))
+        apply_ratings(players)
+        apply_attributes(players)
+        season = init_season(players, season_year=2026, rng=random.Random(42))
+        return season, league_lookup(season)
+
+    def test_initial_contracts_minimum_two_years(self):
+        season, lookup = self._fresh_season()
+        rostered = [p for p in lookup.values() if p.get("team_id")]
+        self.assertTrue(all(int(p.get("contract_years") or 0) >= 2 for p in rostered))
+
+    def test_initial_contract_staggering(self):
+        season, lookup = self._fresh_season()
+        team_id = int(next(iter(season["rosters"])))
+        two_year = [
+            pid
+            for pid in season["rosters"][str(team_id)]
+            if int(lookup[pid].get("contract_years") or 0) == 2
+        ]
+        self.assertGreaterEqual(len(two_year), 2)
+        self.assertLessEqual(len(two_year), 3)
+
+    def test_suggested_extension_offer_meets_ask(self):
+        season, lookup = self._fresh_season()
+        team_id = int(next(iter(season["rosters"])))
+        player_id = season["rosters"][str(team_id)][0]
+        player = lookup[player_id]
+        player["contract_years"] = 1
+        offer = suggested_extension_offer(player, season, team_id, lookup)
+        ask = compute_extension_ask(player)
+        self.assertGreaterEqual(offer["salary"], ask)
+        ok, message = validate_extension_terms(
+            player, offer["salary"], offer["years"], team_id, season, lookup
+        )
+        self.assertTrue(ok, message)
+        accepted, _ = evaluate_extension(
+            player, offer["salary"], offer["years"], season, team_id
+        )
+        self.assertTrue(accepted)
 
     def test_expiring_contract_report(self):
         team_id = int(next(iter(self.season["rosters"])))

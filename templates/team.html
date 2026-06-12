@@ -106,11 +106,12 @@
         <td style="text-align:right;">
           <div class="d-flex flex-wrap gap-1 justify-content-end">
             {% if can_extend and player.get('contract_years') is not none and player.get('contract_years') <= 1 %}
+            {% set ext = extension_offers.get(player.id, {}) %}
             <form method="post" action="{{ url_for('team_extend', player_id=player.id) }}" class="d-flex flex-wrap gap-1 align-items-center">
-              <input type="number" name="salary" step="0.1" min="1" value="{{ (player.get('salary') or 5) * 1.1 }}" class="form-control form-control-sm" style="width:4.5rem;" required>
+              <input type="number" name="salary" step="0.1" min="1" value="{{ ext.get('salary', player.get('salary') or 5) }}" class="form-control form-control-sm" style="width:4.5rem;" required title="Ask ~${{ ext.get('ask', '—') }}M/yr">
               <select name="years" class="form-control form-control-sm" style="width:3rem;">
                 {% for y in range(1, max_fa_years + 1) %}
-                <option value="{{ y }}" {% if y == 2 %}selected{% endif %}>{{ y }}y</option>
+                <option value="{{ y }}" {% if y == (ext.get('years') or 2) %}selected{% endif %}>{{ y }}y</option>
                 {% endfor %}
               </select>
               <button type="submit" class="btn-nba-primary" style="padding:.3rem .55rem;font-size:.7rem;">Extend</button>
