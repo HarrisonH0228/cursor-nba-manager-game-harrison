@@ -2,11 +2,12 @@
 
 from attributes import age_multiplier
 from roster import validate_roster_sizes_after_trade
-from season import can_trade, league_lookup, team_name
+from season import FUTURE_PICK_YEARS, can_trade, league_lookup, team_name
 
 TRADE_TOLERANCE = 15
 
 ROUND_BASE_VALUE = {1: 80, 2: 35, 3: 15}
+PACKAGE_DISCOUNT = 0.55
 
 
 def age_factor(age, peak_age=None):
@@ -15,31 +16,67 @@ def age_factor(age, peak_age=None):
 
 def player_value(player):
     overall = player.get("overall") or 50
-    return overall * age_factor(player.get("age"), player.get("peak_age"))
+    age = player.get("age") or 25
+    factor = age_factor(age, player.get("peak_age"))
+    if age <= 23:
+        factor = max(factor, 0.95)
+    base = overall * factor
+
+    if overall >= 90:
+        base *= 1.5
+    elif overall >= 85:
+        base *= 1.25
+
+    if age <= 23:
+        base *= 1.0 + (24 - age) * 0.05
+
+    return base
 
 
-def pick_value(pick, team_count=30):
+def players_package_value(players):
+    if not players:
+        return 0.0
+    values = sorted((player_value(player) for player in players), reverse=True)
+    total = values[0]
+    for value in values[1:]:
+        total += value * PACKAGE_DISCOUNT
+    return total
+
+
+def pick_value(pick, team_count=30, season_year=None):
     round_num = pick.get("round", 1)
     base = ROUND_BASE_VALUE.get(round_num, 10)
     overall = pick.get("overall") or 1
-    slot = ((overall - 1) % team_count) + 1
+    slot = pick.get("pick_number") or ((overall - 1) % team_count) + 1
     scale = max(0.3, 1.0 - (slot - 1) / max(team_count, 1))
-    return base * scale
+    value = base * scale
+
+    if season_year is not None:
+        years_out = pick.get("year", season_year + 1) - season_year
+        if years_out >= 2:
+            value *= 0.7
+        elif years_out > 2:
+            return 0.0
+
+    return value
 
 
 def assets_value(season, player_ids, pick_ids, team_id):
     lookup = league_lookup(season)
-    total = 0.0
+    players = []
     for player_id in player_ids:
         player = lookup.get(int(player_id))
         if player and player.get("team_id") == team_id:
-            total += player_value(player)
+            players.append(player)
+    total = players_package_value(players)
+
     picks = season.get("draft_picks", {}).get(str(team_id), [])
     pick_map = {pick["id"]: pick for pick in picks}
+    season_year = season.get("season_year", 2026)
     for pick_id in pick_ids:
         pick = pick_map.get(pick_id)
         if pick:
-            total += pick_value(pick)
+            total += pick_value(pick, season_year=season_year)
     return total
 
 
@@ -53,6 +90,14 @@ def trade_window_message(season):
     if phase == "regular":
         return "Trade window closed — deadline passed (55 GP)."
     return "Trades are not available in this phase."
+
+
+def _pick_tradeable(season, pick):
+    season_year = season.get("season_year", 2026)
+    year = pick.get("year")
+    if year is None:
+        return False
+    return season_year + 1 <= year <= season_year + FUTURE_PICK_YEARS
 
 
 def validate_trade(
@@ -95,11 +140,17 @@ def validate_trade(
         pick["id"]: pick for pick in season.get("draft_picks", {}).get(str(partner_team_id), [])
     }
     for pick_id in outgoing_picks:
-        if pick_id not in user_picks:
+        pick = user_picks.get(pick_id)
+        if pick is None:
             return False, "Outgoing pick not owned by your team."
+        if not _pick_tradeable(season, pick):
+            return False, "That pick is outside the tradable window (next 2 drafts)."
     for pick_id in incoming_picks:
-        if pick_id not in partner_picks:
+        pick = partner_picks.get(pick_id)
+        if pick is None:
             return False, "Incoming pick not owned by partner."
+        if not _pick_tradeable(season, pick):
+            return False, "That pick is outside the tradable window (next 2 drafts)."
 
     ok, message = validate_roster_sizes_after_trade(
         season,
@@ -119,19 +170,20 @@ def cpu_accepts_trade(season, user_team_id, partner_team_id, outgoing_players, o
     user_in = assets_value(season, incoming_players, incoming_picks, partner_team_id)
     partner_out = user_in
     partner_in = user_out
-    return abs(partner_out - partner_in) <= TRADE_TOLERANCE
+    partner_net = partner_in - partner_out
+    return partner_net >= -TRADE_TOLERANCE
 
 
-def _meter_label(partner_net, has_assets):
+def _meter_label(partner_net, has_assets, would_accept):
     if not has_assets:
         return "Select assets to preview"
-    if partner_net < -25:
-        return "Hard pass"
-    if partner_net < -TRADE_TOLERANCE:
+    if not would_accept:
         return "Unlikely"
-    if partner_net <= TRADE_TOLERANCE:
+    if partner_net > TRADE_TOLERANCE:
+        return "Very appealing"
+    if partner_net >= 0:
         return "Likely to accept"
-    return "Very appealing"
+    return "Fair deal"
 
 
 def evaluate_trade(
@@ -147,7 +199,7 @@ def evaluate_trade(
     partner_in = assets_value(season, outgoing_players, outgoing_picks, user_team_id)
     partner_out = assets_value(season, incoming_players, incoming_picks, partner_team_id)
     partner_net = round(partner_in - partner_out, 1)
-    would_accept = has_assets and abs(partner_net) <= TRADE_TOLERANCE
+    would_accept = has_assets and partner_net >= -TRADE_TOLERANCE
     meter = 50 if not has_assets else round(max(0, min(100, 50 + partner_net * 2)))
 
     return {
@@ -156,7 +208,7 @@ def evaluate_trade(
         "partner_net": partner_net,
         "would_accept": would_accept,
         "meter": meter,
-        "label": _meter_label(partner_net, has_assets),
+        "label": _meter_label(partner_net, has_assets, would_accept),
         "has_assets": has_assets,
     }
 
@@ -242,6 +294,16 @@ def execute_trade(
 
 def team_picks(season, team_id):
     return list(season.get("draft_picks", {}).get(str(team_id), []))
+
+
+def picks_grouped_by_year(picks):
+    grouped = {}
+    for pick in picks:
+        year = pick.get("year", 0)
+        grouped.setdefault(year, []).append(pick)
+    for year in grouped:
+        grouped[year].sort(key=lambda item: (item.get("round", 0), item.get("pick_number", 0)))
+    return sorted(grouped.items())
 
 
 def other_teams(season, user_team_id):

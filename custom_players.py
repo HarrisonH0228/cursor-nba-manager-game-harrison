@@ -1,6 +1,5 @@
 """Admin-created custom draft prospects."""
 
-import json
 import os
 import uuid
 from datetime import datetime, timezone
@@ -16,6 +15,7 @@ from attributes import (
     init_custom_rookie_career_profile,
     season_averages_from_attributes_deterministic,
 )
+from errors import CustomPlayersWriteError, read_json, write_json
 from season import allocate_player_id
 
 CUSTOM_PLAYERS_PATH = os.path.join(os.path.dirname(__file__), "data", "custom_players.json")
@@ -49,25 +49,18 @@ def _is_overclocked(attributes, potential=None, explicit=False):
 
 
 def load_custom_players():
-    if not os.path.exists(CUSTOM_PLAYERS_PATH):
+    data = read_json(CUSTOM_PLAYERS_PATH, DEFAULT_STORE, "custom players")
+    if not isinstance(data, dict):
         return dict(DEFAULT_STORE)
-
-    with open(CUSTOM_PLAYERS_PATH, encoding="utf-8") as handle:
-        data = json.load(handle)
-
     if not data:
         return dict(DEFAULT_STORE)
-
     data.setdefault("players", [])
     return data
 
 
 def save_custom_players(data):
-    os.makedirs(os.path.dirname(CUSTOM_PLAYERS_PATH), exist_ok=True)
-    temp_path = CUSTOM_PLAYERS_PATH + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=2)
-    os.replace(temp_path, CUSTOM_PLAYERS_PATH)
+    if not write_json(CUSTOM_PLAYERS_PATH, data, "custom players"):
+        raise CustomPlayersWriteError("Could not save custom players.")
 
 
 def list_custom_players():

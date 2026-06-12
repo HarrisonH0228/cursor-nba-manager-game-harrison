@@ -1,9 +1,10 @@
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
 import cache
+from errors import SeasonSaveError, configure_logging, format_cache_timestamp, get_logger
 from fetcher import refresh_cache
 from game import (
     clear_game,
@@ -33,6 +34,7 @@ from season import (
     sim_to_trade_deadline,
     sim_week,
     simulate_all_playoffs,
+    playoff_bracket_view,
     standings_table,
     team_name,
 )
@@ -56,6 +58,7 @@ from trade import (
     evaluate_trade,
     execute_trade,
     other_teams,
+    picks_grouped_by_year,
     team_picks,
     trade_window_message,
     validate_trade,
@@ -102,15 +105,69 @@ from admin_roster import (
 )
 
 load_dotenv()
+configure_logging()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
 ADMIN_ENABLED = os.getenv("ADMIN_ENABLED", "true").lower() == "true"
+logger = get_logger(__name__)
 
 SORT_COLUMNS = {"name", "team", "overall", "ppg", "rpg", "apg", "spg", "bpg"}
 ROSTER_SORT_COLUMNS = {"name", "overall", "age", "gp", "position", "ppg", "rpg", "apg", "spg", "bpg"}
 TEAM_SORT_COLUMNS = {"team", "overall", "roster_size"}
 VIEW_MODES = {"players", "teams", "roster"}
+
+
+def _build_cache_status(flash_result, cache_data):
+    players = cache_data.get("players") or []
+    last_updated = cache_data.get("last_updated")
+    formatted_ts = format_cache_timestamp(last_updated)
+
+    if flash_result:
+        if flash_result.get("ok"):
+            return {
+                "alert_class": "success",
+                "message": "Player data refreshed successfully.",
+            }
+        if flash_result.get("used_cache"):
+            ts = format_cache_timestamp(flash_result.get("last_updated")) or formatted_ts or "unknown time"
+            return {
+                "alert_class": "warning",
+                "message": f"Using cached data from {ts}",
+            }
+        return {
+            "alert_class": "danger",
+            "message": "Player data unavailable. Check your connection and click Refresh Data.",
+        }
+
+    if not players and not last_updated:
+        return {"alert_class": "secondary", "message": "No cached data yet."}
+    if not players:
+        return {
+            "alert_class": "danger",
+            "message": "Player data unavailable. Check your connection and click Refresh Data.",
+        }
+    return None
+
+
+def _require_int(raw, field_name, minimum=None, maximum=None):
+    value_raw = str(raw).strip()
+    if not value_raw.lstrip("-").isdigit():
+        return None, f"Invalid {field_name}."
+    value = int(value_raw)
+    if minimum is not None and value < minimum:
+        return None, f"{field_name} must be at least {minimum}."
+    if maximum is not None and value > maximum:
+        return None, f"{field_name} must be at most {maximum}."
+    return value, None
+
+
+def _coerce_str_list(values):
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        return None
+    return [str(value) for value in values]
 
 
 def _sort_players(players, sort_key, order):
@@ -256,6 +313,8 @@ def _known_team_ids(all_players):
 
 @app.context_processor
 def inject_game():
+    cache_data = cache.load_cache()
+    flash_result = session.pop("cache_flash", None)
     _, season_data = load_session_season()
     return {
         "game": get_game(),
@@ -263,6 +322,7 @@ def inject_game():
         "positions_label": positions_label,
         "max_roster": MAX_ROSTER,
         "admin_enabled": ADMIN_ENABLED,
+        "cache_status": _build_cache_status(flash_result, cache_data),
     }
 
 
@@ -292,7 +352,11 @@ def index():
 
 @app.route("/start", methods=["POST"])
 def start():
-    team = start_game()
+    try:
+        team = start_game()
+    except RuntimeError as exc:
+        flash(str(exc))
+        return redirect(url_for("index"))
     flash(f"You are the GM of the {team['full_name']}!")
     return redirect(url_for("team"))
 
@@ -357,8 +421,8 @@ def team_release(player_id):
         return redirect(url_for("team"))
 
     ok, message = release_player(season_data, game["team_id"], player_id)
-    if ok:
-        save_session_season(season_id, season_data)
+    if ok and not _save_season(season_id, season_data):
+        return redirect(url_for("team"))
     flash(message)
     return redirect(url_for("team"))
 
@@ -413,8 +477,8 @@ def free_agency_sign(player_id):
         return redirect(url_for("free_agency"))
 
     ok, message = sign_free_agent(season_data, game["team_id"], player_id)
-    if ok:
-        save_session_season(season_id, season_data)
+    if ok and not _save_season(season_id, season_data):
+        return redirect(url_for("free_agency"))
     flash(message)
     return redirect(url_for("free_agency"))
 
@@ -468,11 +532,13 @@ def trade():
         trade_message=trade_window_message(season_data),
         user_roster=user_roster,
         user_picks=user_picks,
+        user_picks_by_year=picks_grouped_by_year(user_picks),
         teams=teams,
         partner_id=partner_id,
         partner_name=partner_name,
         partner_roster=partner_roster,
         partner_picks=partner_picks,
+        partner_picks_by_year=picks_grouped_by_year(partner_picks) if partner_id else [],
         trades=season_data.get("trades", [])[-10:],
         user_roster_size=roster_size(season_data, user_team_id),
         max_roster=MAX_ROSTER,
@@ -524,7 +590,7 @@ def trade_propose():
         incoming_players,
         incoming_picks,
     ):
-        flash("Trade rejected — value too far apart.")
+        flash("Trade rejected — partner isn't getting enough value.")
         return redirect(url_for("trade", partner=partner_id))
 
     ok, message = execute_trade(
@@ -536,7 +602,8 @@ def trade_propose():
         incoming_players,
         incoming_picks,
     )
-    _save_season(season_id, season_data)
+    if ok and not _save_season(season_id, season_data):
+        return redirect(url_for("trade", partner=partner_id))
     flash(message)
     return redirect(url_for("trade", partner=partner_id))
 
@@ -558,10 +625,17 @@ def trade_evaluate():
         return jsonify({"error": "Select a trade partner."}), 400
 
     partner_id = int(partner_raw)
-    outgoing_players = payload.get("outgoing_players") or []
-    outgoing_picks = payload.get("outgoing_picks") or []
-    incoming_players = payload.get("incoming_players") or []
-    incoming_picks = payload.get("incoming_picks") or []
+    outgoing_players = _coerce_str_list(payload.get("outgoing_players"))
+    outgoing_picks = _coerce_str_list(payload.get("outgoing_picks"))
+    incoming_players = _coerce_str_list(payload.get("incoming_players"))
+    incoming_picks = _coerce_str_list(payload.get("incoming_picks"))
+    if (
+        outgoing_players is None
+        or outgoing_picks is None
+        or incoming_players is None
+        or incoming_picks is None
+    ):
+        return jsonify({"error": "Invalid trade payload."}), 400
 
     result = evaluate_trade(
         season_data,
@@ -665,8 +739,6 @@ def search():
             stat_columns=STAT_COLUMNS,
             stat_labels=STAT_LABELS,
             last_updated=cache_data.get("last_updated"),
-            refreshed=request.args.get("refreshed") == "1",
-            stale=request.args.get("stale") == "1",
             next_order=_next_order,
             make_search_url=make_search_url,
             user_team_id=game["team_id"] if game else None,
@@ -709,8 +781,6 @@ def search():
             stat_columns=STAT_COLUMNS,
             stat_labels=STAT_LABELS,
             last_updated=cache_data.get("last_updated"),
-            refreshed=request.args.get("refreshed") == "1",
-            stale=request.args.get("stale") == "1",
             next_order=_next_order,
             make_search_url=make_search_url,
             user_team_id=game["team_id"] if game else None,
@@ -749,8 +819,6 @@ def search():
         stat_columns=STAT_COLUMNS,
         stat_labels=STAT_LABELS,
         last_updated=cache_data.get("last_updated"),
-        refreshed=request.args.get("refreshed") == "1",
-        stale=request.args.get("stale") == "1",
         next_order=_next_order,
         make_search_url=make_search_url,
         user_team_id=game["team_id"] if game else None,
@@ -768,7 +836,13 @@ def _season_context():
 
 
 def _save_season(season_id, season_data):
-    save_session_season(season_id, season_data)
+    try:
+        save_session_season(season_id, season_data)
+        return True
+    except SeasonSaveError as exc:
+        logger.exception("Season save failed")
+        flash(str(exc))
+        return False
 
 
 def _render_season(season_id, season_data, lookup, game, page="hub", schedule_day=None):
@@ -825,7 +899,8 @@ def season_start():
     season_id = season_store.create_season_id()
     season_data = init_season(all_players, season_year=cache_data.get("season") or 2026)
     set_season_id(season_id)
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_hub"))
     flash("Season started.")
     return redirect(url_for("season_hub"))
 
@@ -842,7 +917,8 @@ def season_sim_full():
         return redirect(url_for("season_hub"))
 
     count = sim_rest_of_season(season_data, lookup)
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_hub"))
     flash(f"Simulated {count} games. Regular season complete.")
     return redirect(url_for("season_hub"))
 
@@ -861,8 +937,13 @@ def season_schedule():
 
     day_raw = request.args.get("day", "").strip()
     schedule_day = season_data.get("current_day", 1)
-    if day_raw.isdigit():
-        schedule_day = int(day_raw)
+    max_day = season_data.get("max_day", schedule_day)
+    if day_raw:
+        day_value, err = _require_int(day_raw, "Day", minimum=1, maximum=max_day)
+        if err:
+            flash(err)
+        else:
+            schedule_day = day_value
 
     return _render_season(
         season_id,
@@ -913,7 +994,8 @@ def season_sim_day():
         return redirect(url_for("season_hub"))
 
     count = sim_day(season_data, lookup)
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_hub"))
     flash(f"Simulated day {season_data.get('current_day', 1) - 1}: {count} games.")
     return redirect(url_for("season_hub"))
 
@@ -930,7 +1012,8 @@ def season_sim_week():
         return redirect(url_for("season_hub"))
 
     count = sim_week(season_data, lookup)
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_hub"))
     flash(f"Simulated one week: {count} games.")
     return redirect(url_for("season_hub"))
 
@@ -947,7 +1030,8 @@ def season_sim_trade_deadline():
         return redirect(url_for("season_hub"))
 
     count = sim_to_trade_deadline(season_data, lookup)
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_hub"))
     flash(f"Simulated to trade deadline (~55 GP): {count} games.")
     return redirect(url_for("season_hub"))
 
@@ -968,12 +1052,14 @@ def season_playoffs():
         if not regular_season_complete(season_data):
             sim_rest_of_season(season_data, lookup)
         seed_playoffs(season_data, lookup)
-        _save_season(season_id, season_data)
+        if not _save_season(season_id, season_data):
+            return redirect(url_for("season_playoffs"))
         flash("Playoffs seeded.")
         return redirect(url_for("season_playoffs"))
 
     east_standings = standings_table(season_data, conference="East")
     west_standings = standings_table(season_data, conference="West")
+    bracket = playoff_bracket_view(season_data, user_team_id=game["team_id"]) if season_data.get("playoffs") else None
     return render_template(
         "season.html",
         page_title="Playoffs",
@@ -983,6 +1069,7 @@ def season_playoffs():
         east_standings=east_standings,
         west_standings=west_standings,
         user_team_id=game["team_id"],
+        bracket=bracket,
         schedule=[],
         schedule_day=season_data.get("current_day", 1),
         games_played=games_played_count(season_data),
@@ -1012,7 +1099,8 @@ def season_sim_playoffs():
         count = advance_playoff_round(season_data, lookup)
         flash(f"Simulated playoff round: {count} series finished.")
 
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_playoffs"))
     return redirect(url_for("season_playoffs"))
 
 
@@ -1074,7 +1162,8 @@ def season_draft_start():
         return redirect(url_for("season_draft"))
 
     start_draft(season_data, lookup)
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_draft"))
     flash("Draft started.")
     return redirect(url_for("season_draft"))
 
@@ -1092,18 +1181,18 @@ def season_draft_pick():
         return redirect(url_for("season_draft"))
 
     option_raw = request.form.get("prospect_index", "0").strip()
-    try:
-        option_index = int(option_raw)
-    except ValueError:
-        option_index = 0
-
+    option_index, err = _require_int(option_raw, "prospect selection", minimum=0)
     state = season_data.get("draft_state") or {}
     options = state.get("prospect_options", [])
-    prospect = options[option_index] if 0 <= option_index < len(options) else None
+    if err or option_index is None or option_index >= len(options) or not options:
+        flash("Select a valid prospect.")
+        return redirect(url_for("season_draft"))
+    prospect = options[option_index]
 
     ok, message = make_pick(season_data, game["team_id"], prospect=prospect)
-    _save_season(season_id, season_data)
-    flash(message if ok else message)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_draft"))
+    flash(message)
     return redirect(url_for("season_draft"))
 
 
@@ -1127,7 +1216,8 @@ def season_draft_sim():
         count = sim_draft_to_user_pick(season_data, game["team_id"])
         message = f"Simulated {count} CPU picks to your turn."
 
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_draft"))
     flash(message)
     return redirect(url_for("season_draft"))
 
@@ -1148,7 +1238,8 @@ def season_advance():
         return redirect(url_for("season_draft"))
 
     advance_season(season_data)
-    _save_season(season_id, season_data)
+    if not _save_season(season_id, season_data):
+        return redirect(url_for("season_draft"))
     message = f"Welcome to the {season_data['season_year']} season!"
     retirements = season_data.get("last_retirements") or []
     if retirements:
@@ -1230,7 +1321,8 @@ def admin_add_player():
                 int(assign_team_id),
             )
             if ok:
-                _save_season(season_id, season_data)
+                if not _save_season(season_id, season_data):
+                    return redirect(url_for("admin_panel"))
                 message = assign_message
             else:
                 message = f"{message} {assign_message}"
@@ -1341,8 +1433,8 @@ def admin_roster_assign_custom():
         return redirect(url_for("admin_rosters", team_id=team_id or None))
 
     ok, _, message = admin_place_custom_on_team(season_data, custom_id, int(team_id))
-    if ok:
-        _save_season(season_id, season_data)
+    if ok and not _save_season(season_id, season_data):
+        return redirect(url_for("admin_rosters", team_id=team_id))
     flash(message)
     return redirect(url_for("admin_rosters", team_id=team_id))
 
@@ -1365,8 +1457,8 @@ def admin_roster_release():
         return redirect(url_for("admin_rosters", team_id=team_id or None))
 
     ok, message = admin_release_player(season_data, int(team_id), int(player_id))
-    if ok:
-        _save_season(season_id, season_data)
+    if ok and not _save_season(season_id, season_data):
+        return redirect(url_for("admin_rosters", team_id=team_id))
     flash(message)
     return redirect(url_for("admin_rosters", team_id=team_id))
 
@@ -1391,7 +1483,8 @@ def admin_roster_move():
 
     ok, message = admin_move_player(season_data, int(player_id), int(dest_team_id))
     if ok:
-        _save_season(season_id, season_data)
+        if not _save_season(season_id, season_data):
+            return redirect(url_for("admin_rosters", team_id=source_team_id or dest_team_id))
         source_team_id = dest_team_id
     flash(message)
     return redirect(url_for("admin_rosters", team_id=source_team_id or dest_team_id))
@@ -1415,8 +1508,8 @@ def admin_roster_sign_fa():
         return redirect(url_for("admin_rosters", team_id=team_id or None))
 
     ok, message = admin_sign_free_agent(season_data, int(team_id), int(player_id))
-    if ok:
-        _save_season(season_id, season_data)
+    if ok and not _save_season(season_id, season_data):
+        return redirect(url_for("admin_rosters", team_id=team_id))
     flash(message)
     return redirect(url_for("admin_rosters", team_id=team_id))
 
@@ -1441,8 +1534,12 @@ def admin_edit_league_player(player_id):
 
     if request.method == "POST":
         overclock = player.get("is_overclocked", False)
-        career = parse_career_from_form(request.form, overclocked=overclock)
-        attributes = parse_attributes_from_form(request.form, overclocked=overclock)
+        try:
+            career = parse_career_from_form(request.form, overclocked=overclock)
+            attributes = parse_attributes_from_form(request.form, overclocked=overclock)
+        except ValueError as exc:
+            flash(str(exc))
+            return redirect(url_for("admin_edit_league_player", player_id=player_id))
         ok, message = admin_update_league_player(
             season_data,
             player_id,
@@ -1450,7 +1547,8 @@ def admin_edit_league_player(player_id):
             attributes=attributes,
         )
         if ok:
-            _save_season(season_id, season_data)
+            if not _save_season(season_id, season_data):
+                return redirect(url_for("admin_edit_league_player", player_id=player_id))
         flash(message)
         return redirect(url_for("admin_rosters", team_id=player.get("team_id")))
 
@@ -1468,14 +1566,37 @@ def admin_edit_league_player(player_id):
 
 @app.route("/refresh")
 def refresh():
-    try:
-        success = refresh_cache()
-    except Exception:
-        return redirect(url_for("search", stale=1))
+    result = refresh_cache()
+    session["cache_flash"] = result
+    return redirect(url_for("search"))
 
-    if success:
-        return redirect(url_for("search", refreshed=1))
-    return redirect(url_for("search", stale=1))
+
+@app.errorhandler(500)
+def server_error(exc):
+    logger.exception("Unhandled server error")
+    return (
+        render_template(
+            "error.html",
+            page_title="Something went wrong",
+            message="Something went wrong. Please try again.",
+        ),
+        500,
+    )
+
+
+if not app.debug:
+
+    @app.errorhandler(Exception)
+    def uncaught_error(exc):
+        logger.exception("Unhandled exception")
+        return (
+            render_template(
+                "error.html",
+                page_title="Something went wrong",
+                message="Something went wrong. Please try again.",
+            ),
+            500,
+        )
 
 
 if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":

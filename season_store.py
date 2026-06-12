@@ -1,6 +1,7 @@
-import json
 import os
 import uuid
+
+from errors import get_logger, read_json, write_json
 
 SEASONS_DIR = os.path.join(os.path.dirname(__file__), "data", "seasons")
 
@@ -23,6 +24,8 @@ DEFAULT_SEASON = {
     "free_agents": [],
 }
 
+logger = get_logger(__name__)
+
 
 def _season_path(season_id):
     return os.path.join(SEASONS_DIR, f"{season_id}.json")
@@ -37,28 +40,37 @@ def load_season(season_id):
     if not os.path.exists(path):
         return None
 
-    with open(path, encoding="utf-8") as handle:
-        data = json.load(handle)
+    data = read_json(path, None, f"season {season_id}")
+    if not isinstance(data, dict):
+        logger.error("Season file invalid (not an object): %s", path)
+        return None
 
     for key, value in DEFAULT_SEASON.items():
         data.setdefault(key, value if not isinstance(value, dict) else dict(value))
 
-    from season import migrate_season
+    try:
+        from season import migrate_season
 
-    migrate_season(data)
+        migrate_season(data)
+    except Exception:
+        logger.exception("Season migration failed: %s", path)
+        return None
+
     return data
 
 
 def save_season(season_id, data):
-    os.makedirs(SEASONS_DIR, exist_ok=True)
     path = _season_path(season_id)
-    temp_path = path + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=2)
-    os.replace(temp_path, path)
+    return write_json(path, data, f"season {season_id}")
 
 
 def delete_season(season_id):
     path = _season_path(season_id)
-    if os.path.exists(path):
+    if not os.path.exists(path):
+        return True
+    try:
         os.remove(path)
+        return True
+    except OSError:
+        logger.exception("Season delete failed: %s", path)
+        return False

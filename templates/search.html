@@ -19,17 +19,6 @@
     <a href="{{ url_for('refresh') }}" class="btn btn-outline-primary">Refresh Data</a>
 </div>
 
-{% if refreshed %}
-<div class="alert alert-success">Player data refreshed successfully.</div>
-{% endif %}
-
-{% if stale %}
-<div class="alert alert-warning">
-    Refresh failed. Showing the most recent cached data{% if last_updated %} from {{ last_updated }}{% endif %}.
-    Data may be outdated.
-</div>
-{% endif %}
-
 <form method="get" action="{{ url_for('search') }}" class="row g-2 mb-4">
     <input type="hidden" name="sort" value="{{ sort }}">
     <input type="hidden" name="order" value="{{ order }}">

@@ -78,18 +78,21 @@
                     {% endif %}
 
                     <h3 class="h6 text-muted">Draft picks</h3>
-                    {% if user_picks %}
-                    <div class="list-group">
-                        {% for pick in user_picks %}
+                    {% if user_picks_by_year %}
+                    {% for year, picks in user_picks_by_year %}
+                    <p class="small fw-semibold text-muted mb-1">{{ year }} Draft</p>
+                    <div class="list-group mb-3">
+                        {% for pick in picks %}
                         <label class="list-group-item d-flex justify-content-between align-items-center">
                             <span>
                                 <input type="checkbox" name="outgoing_picks" value="{{ pick.id }}"
                                        class="form-check-input me-2" {% if not can_trade %}disabled{% endif %}>
-                                {{ pick.year }} Round {{ pick.round }} (#{{ pick.overall }})
+                                Round {{ pick.round }} (#{{ pick.pick_number }})
                             </span>
                         </label>
                         {% endfor %}
                     </div>
+                    {% endfor %}
                     {% else %}
                     <p class="text-muted mb-0">No picks available.</p>
                     {% endif %}
@@ -122,18 +125,21 @@
                     {% endif %}
 
                     <h3 class="h6 text-muted">Draft picks</h3>
-                    {% if partner_picks %}
-                    <div class="list-group">
-                        {% for pick in partner_picks %}
+                    {% if partner_picks_by_year %}
+                    {% for year, picks in partner_picks_by_year %}
+                    <p class="small fw-semibold text-muted mb-1">{{ year }} Draft</p>
+                    <div class="list-group mb-3">
+                        {% for pick in picks %}
                         <label class="list-group-item d-flex justify-content-between align-items-center">
                             <span>
                                 <input type="checkbox" name="incoming_picks" value="{{ pick.id }}"
                                        class="form-check-input me-2" {% if not can_trade %}disabled{% endif %}>
-                                {{ pick.year }} Round {{ pick.round }} (#{{ pick.overall }})
+                                Round {{ pick.round }} (#{{ pick.pick_number }})
                             </span>
                         </label>
                         {% endfor %}
                     </div>
+                    {% endfor %}
                     {% else %}
                     <p class="text-muted mb-0">No picks available.</p>
                     {% endif %}
@@ -172,8 +178,18 @@
                 incoming_picks: selectedValues("incoming_picks"),
             }),
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                return response.json().catch(() => ({})).then(data => {
+                    throw new Error(data.error || "Preview unavailable");
+                });
+            }
+            return response.json();
+        })
         .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
             bar.style.width = data.meter + "%";
             bar.setAttribute("aria-valuenow", data.meter);
             bar.className = "progress-bar " + (data.would_accept ? "bg-success" : (data.meter < 35 ? "bg-danger" : "bg-warning"));
@@ -186,8 +202,9 @@
                 detail.textContent = "They receive: — · They send: — · Net: —";
             }
         })
-        .catch(() => {
-            label.textContent = "Preview unavailable";
+        .catch((err) => {
+            label.textContent = err.message || "Preview unavailable";
+            label.className = "badge bg-danger";
         });
     }
 

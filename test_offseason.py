@@ -14,15 +14,24 @@ import cache
 from season import (
     advance_season,
     can_trade,
+    draft_order,
     init_season,
     league_lookup,
+    pick_owner,
     regular_season_complete,
     seed_playoffs,
     sim_rest_of_season,
     sim_to_trade_deadline,
     simulate_all_playoffs,
 )
-from trade import cpu_accepts_trade, evaluate_trade, execute_trade, validate_trade
+from trade import (
+    cpu_accepts_trade,
+    evaluate_trade,
+    execute_trade,
+    player_value,
+    players_package_value,
+    validate_trade,
+)
 from roster import MAX_ROSTER, MIN_ROSTER, release_player, roster_size, sign_free_agent
 
 
@@ -54,9 +63,13 @@ class OffseasonTests(unittest.TestCase):
         team_ids = self.season["rosters"].keys()
         for team_id in team_ids:
             picks = self.season["draft_picks"][team_id]
-            self.assertEqual(len(picks), 3)
+            self.assertEqual(len(picks), 6)
             rounds = {pick["round"] for pick in picks}
             self.assertEqual(rounds, {1, 2, 3})
+            years = {pick["year"] for pick in picks}
+            self.assertEqual(years, {2027, 2028})
+            for pick in picks:
+                self.assertIn("pick_number", pick)
 
     def test_league_lookup_and_rosters(self):
         lookup = league_lookup(self.season)
@@ -177,7 +190,7 @@ class OffseasonTests(unittest.TestCase):
                 break
 
         self.assertTrue(preview["would_accept"], "Expected a near-even trade to be accepted")
-        self.assertLessEqual(abs(preview["partner_net"]), 15)
+        self.assertGreaterEqual(preview["partner_net"], -15)
         self.assertLessEqual(abs(preview["meter"] - 50), 30)
         self.assertEqual(
             preview["would_accept"],
@@ -186,19 +199,132 @@ class OffseasonTests(unittest.TestCase):
             ),
         )
 
-        lopsided_out = [user_players[0]["id"]]
-        lopsided_in = [partner_players[-1]["id"]]
+        lopsided_out = [user_players[-1]["id"]]
+        lopsided_in = [partner_players[0]["id"]]
         lopsided = evaluate_trade(
             self.season, user_team, partner_team, lopsided_out, [], lopsided_in, []
         )
         self.assertFalse(lopsided["would_accept"])
-        self.assertTrue(lopsided["meter"] >= 65 or lopsided["meter"] <= 35)
+        self.assertLess(lopsided["partner_net"], -15)
         self.assertEqual(
             lopsided["would_accept"],
             cpu_accepts_trade(
                 self.season, user_team, partner_team, lopsided_out, [], lopsided_in, []
             ),
         )
+
+    def test_cpu_accepts_overpay_trades(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+        lookup = league_lookup(self.season)
+        user_players = sorted(
+            [lookup[pid] for pid in self.season["rosters"][str(user_team)]],
+            key=lambda player: player.get("overall") or 0,
+            reverse=True,
+        )
+        partner_players = sorted(
+            [lookup[pid] for pid in self.season["rosters"][str(partner_team)]],
+            key=lambda player: player.get("overall") or 0,
+            reverse=True,
+        )
+        overpay_out = [user_players[0]["id"]]
+        overpay_in = [partner_players[-1]["id"]]
+        preview = evaluate_trade(
+            self.season, user_team, partner_team, overpay_out, [], overpay_in, []
+        )
+        self.assertTrue(preview["would_accept"])
+        self.assertGreater(preview["partner_net"], 15)
+        self.assertTrue(
+            cpu_accepts_trade(
+                self.season, user_team, partner_team, overpay_out, [], overpay_in, []
+            )
+        )
+
+    def test_traded_pick_changes_draft_queue_owner(self):
+        lookup = league_lookup(self.season)
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+        traded_pick = next(
+            pick
+            for pick in self.season["draft_picks"][str(user_team)]
+            if pick.get("year") == 2027 and pick.get("round") == 1
+        )
+        ok, _ = execute_trade(
+            self.season,
+            user_team,
+            partner_team,
+            [],
+            [traded_pick["id"]],
+            [],
+            [],
+        )
+        self.assertTrue(ok)
+
+        sim_rest_of_season(self.season, lookup, rng=self.rng)
+        seed_playoffs(self.season, lookup)
+        simulate_all_playoffs(self.season, lookup, rng=self.rng)
+        self.season["phase"] = "complete"
+        lottery = draft_order(self.season, lookup, rng=self.rng)
+        slot = next(
+            item
+            for item in lottery["queue"]
+            if item.get("pick_id") == traded_pick["id"]
+        )
+        self.assertEqual(slot["team_id"], partner_team)
+        self.assertEqual(
+            pick_owner(
+                self.season,
+                traded_pick["year"],
+                traded_pick["round"],
+                traded_pick["pick_number"],
+            ),
+            partner_team,
+        )
+
+    def test_superstar_beats_role_player_package(self):
+        superstar = {"overall": 95, "age": 27, "peak_age": 28}
+        role_a = {"overall": 80, "age": 28, "peak_age": 28}
+        role_b = {"overall": 80, "age": 29, "peak_age": 29}
+        star_value = player_value(superstar)
+        package_value = players_package_value([role_a, role_b])
+        self.assertGreater(star_value, package_value)
+
+    def test_young_star_premium(self):
+        young = {"overall": 88, "age": 21, "peak_age": 27}
+        older = {"overall": 88, "age": 30, "peak_age": 30}
+        self.assertGreater(player_value(young), player_value(older))
+
+    def test_advance_season_preserves_traded_future_pick(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        partner_team = int(next(tid for tid in self.season["rosters"] if int(tid) != user_team))
+        future_pick = next(
+            pick for pick in self.season["draft_picks"][str(user_team)] if pick.get("year") == 2028
+        )
+        ok, _ = execute_trade(
+            self.season,
+            user_team,
+            partner_team,
+            [],
+            [future_pick["id"]],
+            [],
+            [],
+        )
+        self.assertTrue(ok)
+
+        lookup = league_lookup(self.season)
+        sim_rest_of_season(self.season, lookup, rng=self.rng)
+        seed_playoffs(self.season, lookup)
+        simulate_all_playoffs(self.season, lookup, rng=self.rng)
+        self.season["phase"] = "complete"
+        start_draft(self.season, lookup, rng=self.rng)
+        sim_rest_of_draft(self.season, auto_user_picks=True, rng=self.rng)
+
+        advance_season(self.season, rng=self.rng)
+        partner_picks = self.season["draft_picks"][str(partner_team)]
+        self.assertTrue(any(pick["id"] == future_pick["id"] for pick in partner_picks))
+        partner_years = {pick["year"] for pick in partner_picks}
+        self.assertIn(2028, partner_years)
+        self.assertIn(2029, partner_years)
 
     def test_draft_talent_curve(self):
         team_count = len(self.season["rosters"])

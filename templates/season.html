@@ -102,6 +102,159 @@
 </div>
 {% endif %}
 
+{% if bracket and not bracket.user_in_playoffs %}
+<div class="alert alert-secondary mb-3">Your team did not make the playoffs.</div>
+{% endif %}
+
+<style>
+.playoff-bracket {
+    display: grid;
+    grid-template-columns: 1fr minmax(220px, 280px) 1fr;
+    gap: 1.5rem;
+    align-items: start;
+}
+.bracket-column h3 {
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6c757d;
+    margin-bottom: 1rem;
+}
+.bracket-round {
+    margin-bottom: 1.25rem;
+}
+.bracket-round-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #868e96;
+    margin-bottom: 0.5rem;
+}
+.bracket-series {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.5rem;
+    background: #fff;
+    font-size: 0.875rem;
+}
+.bracket-series.user-series {
+    border: 2px solid #0d6efd;
+    background: #eef5ff;
+}
+.bracket-series.user-eliminated {
+    opacity: 0.72;
+}
+.bracket-team {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.15rem 0;
+}
+.bracket-team.winner {
+    font-weight: 700;
+}
+.bracket-score {
+    font-size: 0.8rem;
+    color: #495057;
+    margin-top: 0.35rem;
+}
+.bracket-center {
+    text-align: center;
+}
+.bracket-finals-box {
+    border: 2px solid #ffc107;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background: #fffdf5;
+    margin-bottom: 1rem;
+}
+@media (max-width: 992px) {
+    .playoff-bracket {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+{% macro series_box(series) %}
+<div class="bracket-series{% if series.involves_user %} user-series{% endif %}{% if series.user_lost %} user-eliminated{% endif %}">
+    <div class="bracket-team{% if series.complete and series.winner_id == series.high_seed_id %} winner{% endif %}">
+        <span>
+            {{ series.high_seed_name }}
+            {% if series.user_is_high %}<span class="badge bg-primary ms-1">You</span>{% endif %}
+        </span>
+        <span>{{ series.high_wins }}</span>
+    </div>
+    <div class="bracket-team{% if series.complete and series.winner_id == series.low_seed_id %} winner{% endif %}">
+        <span>
+            {{ series.low_seed_name }}
+            {% if series.user_is_low %}<span class="badge bg-primary ms-1">You</span>{% endif %}
+        </span>
+        <span>{{ series.low_wins }}</span>
+    </div>
+    <div class="bracket-score">
+        {% if series.placeholder %}
+        <span class="text-muted">Awaiting matchup</span>
+        {% elif series.complete %}
+        Winner: {{ series.winner_name }}
+        {% if series.user_lost %} · <span class="text-danger">Eliminated</span>{% endif %}
+        {% else %}
+        In progress
+        {% endif %}
+    </div>
+</div>
+{% endmacro %}
+
+{% if bracket %}
+<div class="playoff-bracket mb-4">
+    <div class="bracket-column bracket-east">
+        <h3>East</h3>
+        <div class="bracket-round">
+            <div class="bracket-round-title">Quarterfinals</div>
+            {% for series in bracket.east.quarterfinals %}{{ series_box(series) }}{% endfor %}
+        </div>
+        <div class="bracket-round">
+            <div class="bracket-round-title">Semifinals</div>
+            {% for series in bracket.east.semifinals %}{{ series_box(series) }}{% endfor %}
+        </div>
+        <div class="bracket-round">
+            <div class="bracket-round-title">Conference Finals</div>
+            {% for series in bracket.east.finals %}{{ series_box(series) }}{% endfor %}
+        </div>
+    </div>
+
+    <div class="bracket-column bracket-center">
+        <h3>NBA Finals</h3>
+        {% for series in bracket.nba_finals %}
+        <div class="bracket-finals-box">
+            {{ series_box(series) }}
+        </div>
+        {% endfor %}
+        {% if bracket.champion_name %}
+        <div class="alert alert-success py-2 px-3 mb-0">
+            <strong>Champion</strong><br>{{ bracket.champion_name }}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="bracket-column bracket-west">
+        <h3>West</h3>
+        <div class="bracket-round">
+            <div class="bracket-round-title">Quarterfinals</div>
+            {% for series in bracket.west.quarterfinals %}{{ series_box(series) }}{% endfor %}
+        </div>
+        <div class="bracket-round">
+            <div class="bracket-round-title">Semifinals</div>
+            {% for series in bracket.west.semifinals %}{{ series_box(series) }}{% endfor %}
+        </div>
+        <div class="bracket-round">
+            <div class="bracket-round-title">Conference Finals</div>
+            {% for series in bracket.west.finals %}{{ series_box(series) }}{% endfor %}
+        </div>
+    </div>
+</div>
+{% else %}
 {% for round in season.playoffs.rounds %}
 {% if round.series %}
 <div class="card mb-3">
@@ -131,6 +284,7 @@
 </div>
 {% endif %}
 {% endfor %}
+{% endif %}
 {% endif %}
 
 {% elif page == 'schedule' %}

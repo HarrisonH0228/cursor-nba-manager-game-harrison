@@ -7,6 +7,7 @@ from simulation import simulate_game, simulate_game_with_box_score
 GAMES_PER_TEAM = 82
 EXTRA_HOME_GAMES = 12
 TRADE_DEADLINE_GAMES = 55
+FUTURE_PICK_YEARS = 2
 PLAYOFF_SERIES_LENGTH = 7
 PLAYOFF_WINS_NEEDED = 4
 
@@ -105,6 +106,7 @@ def migrate_season(season, rng=None):
         if not player.get("team_id"):
             free_agents.append(player.get("id", int(key)))
     season["free_agents"] = sorted(set(free_agents))
+    _migrate_draft_picks(season)
     return season
 
 
@@ -117,23 +119,93 @@ def league_lookup(season):
 
 
 def init_draft_picks(team_ids, year):
-    picks_by_team = {}
-    pick_number = 1
-    for team_id in sorted(team_ids):
-        team_picks = []
+    sorted_ids = sorted(team_ids)
+    team_count = len(sorted_ids)
+    picks_by_team = {str(team_id): [] for team_id in sorted_ids}
+    for index, team_id in enumerate(sorted_ids):
+        slot = index + 1
         for round_num in (1, 2, 3):
-            team_picks.append(
+            overall = (round_num - 1) * team_count + slot
+            picks_by_team[str(team_id)].append(
                 {
                     "id": f"pick-{team_id}-{year}-r{round_num}",
                     "year": year,
                     "round": round_num,
-                    "overall": pick_number,
+                    "pick_number": slot,
+                    "overall": overall,
                     "original_team_id": team_id,
                 }
             )
-            pick_number += 1
-        picks_by_team[str(team_id)] = team_picks
     return picks_by_team
+
+
+def init_future_draft_picks(team_ids, season_year):
+    merged = {str(team_id): [] for team_id in sorted(team_ids)}
+    for offset in range(1, FUTURE_PICK_YEARS + 1):
+        year_picks = init_draft_picks(team_ids, season_year + offset)
+        for team_id_str, picks in year_picks.items():
+            merged[team_id_str].extend(picks)
+    return merged
+
+
+def all_pick_assets(season, year=None):
+    assets = []
+    for picks in season.get("draft_picks", {}).values():
+        for pick in picks:
+            if year is None or pick.get("year") == year:
+                assets.append(pick)
+    return assets
+
+
+def find_pick_asset(season, year, round_num, pick_number):
+    for picks in season.get("draft_picks", {}).values():
+        for pick in picks:
+            if (
+                pick.get("year") == year
+                and pick.get("round") == round_num
+                and pick.get("pick_number") == pick_number
+            ):
+                return pick
+    return None
+
+
+def pick_owner(season, year, round_num, pick_number):
+    for team_id_str, picks in season.get("draft_picks", {}).items():
+        for pick in picks:
+            if (
+                pick.get("year") == year
+                and pick.get("round") == round_num
+                and pick.get("pick_number") == pick_number
+            ):
+                return int(team_id_str)
+    return None
+
+
+def _migrate_draft_picks(season):
+    team_ids = sorted(int(team_id) for team_id in season.get("rosters", {}).keys())
+    if not team_ids:
+        return
+    season_year = season.get("season_year", 2026)
+    draft_picks = season.setdefault("draft_picks", {})
+    for team_id in team_ids:
+        draft_picks.setdefault(str(team_id), [])
+
+    for pick in all_pick_assets(season):
+        if "pick_number" not in pick:
+            team_count = len(team_ids)
+            overall = pick.get("overall") or 1
+            round_num = pick.get("round") or ((overall - 1) // team_count + 1)
+            slot = ((overall - 1) % team_count) + 1
+            pick["round"] = round_num
+            pick["pick_number"] = slot
+
+    years_present = {pick.get("year") for pick in all_pick_assets(season)}
+    target_years = {season_year + offset for offset in range(1, FUTURE_PICK_YEARS + 1)}
+    missing_years = target_years - years_present
+    for year in sorted(missing_years):
+        year_picks = init_draft_picks(team_ids, year)
+        for team_id_str, picks in year_picks.items():
+            draft_picks[team_id_str].extend(picks)
 
 
 def can_trade(season):
@@ -174,7 +246,6 @@ def init_season(players, season_year=2026, rng=None):
         }
         for team_id in team_ids
     }
-    draft_year = season_year + 1
     player_pool = build_player_pool(players, rng)
     season = {
         "season_year": season_year,
@@ -185,7 +256,7 @@ def init_season(players, season_year=2026, rng=None):
         "next_player_id": NEXT_PLAYER_ID_START,
         "players": player_pool,
         "free_agents": sorted(set(free_agent_ids)),
-        "draft_picks": init_draft_picks(team_ids, draft_year),
+        "draft_picks": init_future_draft_picks(team_ids, season_year),
         "draft_state": None,
         "trades": [],
         "rosters": {str(team_id): roster for team_id, roster in team_players.items()},
@@ -431,15 +502,22 @@ def draft_order(season, lookup=None, rng=None):
     lottery_result = run_draft_lottery(season, lookup, rng=rng)
     round1_order = lottery_result["round1_team_order"]
     team_count = len(round1_order)
+    draft_year = season.get("season_year", 2026) + 1
     order = []
     for round_num in (1, 2, 3):
-        for index, row in enumerate(round1_order, start=1):
+        for slot in range(1, team_count + 1):
+            owner_id = pick_owner(season, draft_year, round_num, slot)
+            if owner_id is None:
+                owner_id = round1_order[slot - 1]["team_id"]
+            pick = find_pick_asset(season, draft_year, round_num, slot)
             order.append(
                 {
-                    "pick_number": (round_num - 1) * team_count + index,
+                    "pick_number": (round_num - 1) * team_count + slot,
                     "round": round_num,
-                    "team_id": row["team_id"],
-                    "team_name": row["team_name"],
+                    "pick_number_in_round": slot,
+                    "team_id": owner_id,
+                    "team_name": team_name(season, owner_id),
+                    "pick_id": pick["id"] if pick else None,
                 }
             )
     lottery_result["queue"] = order
@@ -455,7 +533,9 @@ def advance_season(season, rng=None):
         for team_id, record in season.get("standings", {}).items()
     }
 
-    season_year = season.get("season_year", 2026) + 1
+    old_season_year = season.get("season_year", 2026)
+    season_year = old_season_year + 1
+    completed_draft_year = old_season_year + 1
     schedule = generate_schedule(team_ids, rng)
     standings = {
         str(team_id): {
@@ -466,6 +546,20 @@ def advance_season(season, rng=None):
         }
         for team_id in team_ids
     }
+
+    merged_picks = {}
+    for team_id in team_ids:
+        kept = [
+            pick
+            for pick in season.get("draft_picks", {}).get(str(team_id), [])
+            if pick.get("year") != completed_draft_year
+        ]
+        merged_picks[str(team_id)] = kept
+
+    new_pick_year = season_year + FUTURE_PICK_YEARS
+    fresh_picks = init_draft_picks(team_ids, new_pick_year)
+    for team_id in team_ids:
+        merged_picks[str(team_id)].extend(fresh_picks[str(team_id)])
 
     season.update(
         {
@@ -478,7 +572,7 @@ def advance_season(season, rng=None):
             "playoffs": None,
             "recent_results": [],
             "draft_state": None,
-            "draft_picks": init_draft_picks(team_ids, season_year + 1),
+            "draft_picks": merged_picks,
             "last_retirements": retirements,
         }
     )
@@ -884,6 +978,117 @@ def simulate_all_playoffs(season, lookup, rng=None):
         if played == 0:
             break
     return total
+
+
+def _placeholder_series(conference, count=1):
+    placeholders = []
+    for _ in range(count):
+        placeholders.append(
+            {
+                "conference": conference,
+                "high_seed_id": None,
+                "high_seed_name": "TBD",
+                "low_seed_id": None,
+                "low_seed_name": "TBD",
+                "high_wins": 0,
+                "low_wins": 0,
+                "winner_id": None,
+                "winner_name": None,
+                "complete": False,
+                "placeholder": True,
+            }
+        )
+    return placeholders
+
+
+def _series_view(series, user_team_id):
+    high_id = series.get("high_seed_id")
+    low_id = series.get("low_seed_id")
+    involves_user = user_team_id is not None and user_team_id in {high_id, low_id}
+    user_won = series.get("complete") and series.get("winner_id") == user_team_id
+    user_lost = (
+        series.get("complete")
+        and involves_user
+        and series.get("winner_id") != user_team_id
+    )
+    return {
+        **series,
+        "involves_user": involves_user,
+        "user_is_high": user_team_id == high_id,
+        "user_is_low": user_team_id == low_id,
+        "user_won": user_won,
+        "user_lost": user_lost,
+    }
+
+
+def playoff_bracket_view(season, user_team_id=None):
+    playoffs = season.get("playoffs") or {}
+    rounds = playoffs.get("rounds", [])
+    round_names = {
+        0: "quarterfinals",
+        1: "semifinals",
+        2: "finals",
+        3: "nba_finals",
+    }
+    bracket = {
+        "east": {"quarterfinals": [], "semifinals": [], "finals": []},
+        "west": {"quarterfinals": [], "semifinals": [], "finals": []},
+        "nba_finals": [],
+        "champion_name": playoffs.get("champion_name"),
+        "user_in_playoffs": False,
+        "user_eliminated": False,
+    }
+
+    expected_counts = {"quarterfinals": 4, "semifinals": 2, "finals": 1}
+
+    for round_index, round_data in enumerate(rounds):
+        round_key = round_names.get(round_index)
+        if not round_key:
+            continue
+        series_list = round_data.get("series", [])
+        if round_key == "nba_finals":
+            if series_list:
+                bracket["nba_finals"] = [_series_view(series_list[0], user_team_id)]
+            else:
+                bracket["nba_finals"] = [
+                    _series_view(_placeholder_series("Finals")[0], user_team_id)
+                ]
+            continue
+
+        for conference in ("East", "West"):
+            conf_key = conference.lower()
+            conf_series = [s for s in series_list if s.get("conference") == conference]
+            viewed = [_series_view(series, user_team_id) for series in conf_series]
+            if round_key in expected_counts:
+                missing = expected_counts[round_key] - len(viewed)
+                if missing > 0:
+                    viewed.extend(
+                        _series_view(item, user_team_id)
+                        for item in _placeholder_series(conference, missing)
+                    )
+            bracket[conf_key][round_key] = viewed
+
+    if not bracket["nba_finals"]:
+        bracket["nba_finals"] = [
+            _series_view(_placeholder_series("Finals")[0], user_team_id)
+        ]
+
+    all_series = []
+    for conf in ("east", "west"):
+        for stage in ("quarterfinals", "semifinals", "finals"):
+            all_series.extend(bracket[conf][stage])
+    all_series.extend(bracket["nba_finals"])
+
+    if user_team_id is not None:
+        bracket["user_in_playoffs"] = any(
+            series.get("involves_user") and not series.get("placeholder")
+            for series in all_series
+        )
+        bracket["user_eliminated"] = any(
+            series.get("user_lost") for series in all_series if not series.get("placeholder")
+        )
+
+    return bracket
 
 
 def schedule_games(season, day=None, team_id=None, played=None):
