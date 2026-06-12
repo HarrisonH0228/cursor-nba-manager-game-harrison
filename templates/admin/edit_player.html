@@ -24,6 +24,10 @@
   <div class="mb-3"><label>Retirement age</label><input class="form-control" name="retirement_age" value="{{ form_data.get('retirement_age', player.retirement_age or '') if form_data else (player.retirement_age or '') }}"><small class="text-muted-nba">Must be greater than current age.</small></div>
   <div class="mb-3"><label>Development rate (0.5–2.0)</label><input class="form-control" name="development_rate" step="0.01" value="{{ form_data.get('development_rate', player.development_rate or '') if form_data else (player.development_rate or '') }}"><small class="text-muted-nba">1.0 = normal. 1.5 = fast riser. 0.7 = slow developer.</small></div>
 
+  <h3 style="font-size:1rem;margin:1.5rem 0 1rem;">Contract</h3>
+  <div class="mb-3"><label>Salary ($M/yr)</label><input class="form-control" name="salary" step="0.1" min="1" value="{{ form_data.get('salary', player.salary or '') if form_data else (player.salary or '') }}"></div>
+  <div class="mb-3"><label>Contract years</label><input class="form-control" name="contract_years" value="{{ form_data.get('contract_years', player.contract_years or '') if form_data else (player.contract_years or '') }}"></div>
+
   <h3 style="font-size:1rem;margin:1.5rem 0 1rem;">Attributes</h3>
   {% for key in attribute_keys %}
   <div class="mb-2"><label>{{ key|title }}</label><input class="form-control" name="attr_{{ key }}" value="{{ form_data.get('attr_' ~ key, player.attributes[key] if player.attributes else '') if form_data else (player.attributes[key] if player.attributes else '') }}"></div>

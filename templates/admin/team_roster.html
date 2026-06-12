@@ -3,12 +3,55 @@
 <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-2">
   <div>
     <p class="section-title">Admin · Roster</p>
-    <h1>{{ team_name }}</h1>
+    <h1>{{ team_name }}{% if is_user_team %} <span class="badge-nba badge-nba-blue">Your Team</span>{% endif %}</h1>
     <p class="text-muted-nba">{{ record }} · {{ roster_size }} players</p>
   </div>
   <div class="d-flex gap-2">
     <a href="{{ url_for('admin.admin_teams') }}" class="btn-nba-ghost">← Teams</a>
     <a href="{{ url_for('admin.admin_create_player') }}" class="btn-nba-secondary">Add Player</a>
+  </div>
+</div>
+
+<div class="card-nba mb-4">
+  <div class="card-nba-header"><h2>Salary Cap &amp; Finances</h2></div>
+  <div class="card-nba-body">
+    <div class="d-flex flex-wrap gap-3 mb-3" style="font-size:.9rem;">
+      <div><span class="text-muted-nba">Payroll</span><br><strong>${{ finances.payroll }}M</strong></div>
+      <div><span class="text-muted-nba">Cap space</span><br><strong>${{ finances.cap_space }}M</strong></div>
+      <div><span class="text-muted-nba">Team cap</span><br><strong>${{ finances.salary_cap }}M</strong>{% if finances.cap_override %} <span class="badge-nba badge-nba-gray">override</span>{% endif %}</div>
+      <div><span class="text-muted-nba">League default</span><br><strong>${{ finances.league_salary_cap }}M</strong></div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-4 align-items-end">
+      <form method="post" class="d-flex flex-wrap gap-2 align-items-end">
+        <input type="hidden" name="action" value="set_cap">
+        <div>
+          <label class="text-muted-nba" style="font-size:.8rem;">Salary cap ($M)</label>
+          <input class="form-control" type="number" name="salary_cap" step="0.1" min="50" max="500"
+                 value="{{ finances.salary_cap }}" style="width:8rem;" required>
+        </div>
+        <button type="submit" class="btn-nba-primary">Set Cap</button>
+      </form>
+
+      {% if finances.cap_override %}
+      <form method="post">
+        <input type="hidden" name="action" value="reset_cap">
+        <button type="submit" class="btn-nba-ghost">Reset to League Default</button>
+      </form>
+      {% endif %}
+
+      <form method="post" class="d-flex flex-wrap gap-2 align-items-end"
+            onsubmit="return confirm('Scale all roster salaries on this team?');">
+        <input type="hidden" name="action" value="discount_salaries">
+        <div>
+          <label class="text-muted-nba" style="font-size:.8rem;">Pay % of current salary</label>
+          <input class="form-control" type="number" name="salary_pct" step="1" min="5" max="100"
+                 value="50" style="width:8rem;" required>
+        </div>
+        <button type="submit" class="btn-nba-secondary">Apply to Roster</button>
+      </form>
+    </div>
+    <p class="text-muted-nba mt-2 mb-0" style="font-size:.75rem;">Raise cap for more signing room, or apply a pay % (e.g. 50) to cut every contract on this team.</p>
   </div>
 </div>
 
@@ -33,7 +76,15 @@
         <td>{{ player.overall }}</td>
         <td>{{ player.age }}</td>
         <td>{{ player.ppg|stat1 }}</td>
-        <td>${{ player.get('salary', '—') }}M</td>
+        <td>
+          <form method="post" class="d-flex gap-1 align-items-center">
+            <input type="hidden" name="action" value="set_player_salary">
+            <input type="hidden" name="player_id" value="{{ player.id }}">
+            <input class="form-control" type="number" name="salary" step="0.1" min="1"
+                   value="{{ player.get('salary', '') }}" style="width:5rem;padding:.25rem .4rem;font-size:.8rem;">
+            <button type="submit" class="btn-nba-ghost" style="padding:.25rem .45rem;font-size:.65rem;">Set</button>
+          </form>
+        </td>
         <td>{{ player.get('contract_years', '—') }} yr</td>
         <td>
           <div class="d-flex flex-wrap gap-1">

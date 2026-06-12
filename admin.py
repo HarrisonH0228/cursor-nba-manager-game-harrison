@@ -16,7 +16,17 @@ from attributes import (
     init_rookie_career_profile,
     refresh_player_from_attributes,
 )
-from contracts import assign_player_contract, ensure_contract_fields, refresh_all_team_finances
+from contracts import (
+    MIN_SALARY_M,
+    apply_roster_salary_multiplier,
+    assign_player_contract,
+    clear_team_salary_cap,
+    ensure_contract_fields,
+    get_salary_cap,
+    refresh_all_team_finances,
+    set_team_salary_cap,
+    team_finances,
+)
 from draft import generate_rookie_profile
 from game import get_game, load_session_season, save_session_season
 from names import ensure_unique_name
@@ -182,6 +192,26 @@ def _validate_player_form(form, *, is_create=False, existing_player=None, valid_
             parsed["ppg"] = round(ppg_val, 1)
             parsed["manual_ppg"] = True
 
+    salary_raw = form.get("salary", "").strip()
+    if salary_raw:
+        salary_val = _parse_float(salary_raw)
+        if salary_val is None:
+            errors.append("Salary must be a number.")
+        elif salary_val < MIN_SALARY_M:
+            errors.append(f"Salary must be at least ${MIN_SALARY_M}M.")
+        else:
+            parsed["salary"] = round(salary_val, 1)
+
+    contract_years_raw = form.get("contract_years", "").strip()
+    if contract_years_raw:
+        contract_years = _parse_int(contract_years_raw)
+        if contract_years is None:
+            errors.append("Contract years must be a whole number.")
+        elif not 0 <= contract_years <= 6:
+            errors.append("Contract years must be between 0 and 6.")
+        else:
+            parsed["contract_years"] = contract_years
+
     parsed["attributes"] = {}
     for key in ATTRIBUTE_KEYS:
         raw = form.get(f"attr_{key}", "").strip()
@@ -337,6 +367,12 @@ def admin_edit_player(player_id):
 
         player["overall"] = compute_intrinsic_overall(player)
 
+        if "salary" in parsed:
+            player["salary"] = parsed["salary"]
+            player["previous_salary"] = parsed["salary"]
+        if "contract_years" in parsed:
+            player["contract_years"] = parsed["contract_years"]
+
         if "team_id" in parsed:
             current_team = _parse_int(player.get("team_id"))
             new_team = parsed["team_id"]
@@ -491,14 +527,20 @@ def admin_teams():
         return redirect_response
 
     teams = []
+    game = get_game()
+    user_team_id = int(game["team_id"]) if game and game.get("team_id") else None
     for team in _admin_teams(season_data):
         tid = team["team_id"]
         record = season_data.get("standings", {}).get(str(tid), {})
+        cap_override = (season_data.get("salary_cap_overrides") or {}).get(str(tid))
         teams.append(
             {
                 **team,
                 "roster_size": roster_size(season_data, tid),
                 "record": f"{record.get('w', 0)}-{record.get('l', 0)}",
+                "is_user_team": user_team_id == tid,
+                "salary_cap": get_salary_cap(season_data, tid),
+                "cap_override": cap_override,
             }
         )
 
@@ -536,6 +578,45 @@ def admin_team_roster(team_id):
                     season_data, player_id, team_id, force=True
                 )
                 flash(message, "success" if ok else "error")
+        elif action == "set_cap":
+            cap_raw = request.form.get("salary_cap", "").strip()
+            cap_val = _parse_float(cap_raw)
+            if cap_val is None:
+                flash("Salary cap must be a number.", "error")
+            else:
+                try:
+                    set_team_salary_cap(season_data, team_id, cap_val)
+                    flash(f"Salary cap set to ${cap_val:.1f}M for {team_name(season_data, team_id)}.")
+                except ValueError as exc:
+                    flash(str(exc), "error")
+        elif action == "reset_cap":
+            clear_team_salary_cap(season_data, team_id)
+            flash(f"Salary cap reset to league default (${get_salary_cap(season_data)}M).")
+        elif action == "discount_salaries":
+            pct_raw = request.form.get("salary_pct", "").strip()
+            pct_val = _parse_float(pct_raw)
+            if pct_val is None or not 5 <= pct_val <= 100:
+                flash("Salary percentage must be between 5 and 100.", "error")
+            else:
+                updated = apply_roster_salary_multiplier(
+                    season_data, team_id, pct_val / 100.0, lookup
+                )
+                flash(f"Scaled {updated} player salaries to {pct_val:.0f}% of previous pay.")
+        elif action == "set_player_salary":
+            player_id = _parse_int(request.form.get("player_id"))
+            salary_val = _parse_float(request.form.get("salary", "").strip())
+            if player_id is None or salary_val is None:
+                flash("Player and salary are required.", "error")
+            elif salary_val < MIN_SALARY_M:
+                flash(f"Salary must be at least ${MIN_SALARY_M}M.", "error")
+            else:
+                player = lookup.get(player_id)
+                if not player or int(player.get("team_id") or -1) != team_id:
+                    flash("Player not found on this roster.", "error")
+                else:
+                    player["salary"] = round(salary_val, 1)
+                    player["previous_salary"] = player["salary"]
+                    flash(f"Updated {player.get('name', player_id)} salary to ${salary_val:.1f}M.")
         reconcile_team_roster(season_data, team_id)
         ensure_contract_fields(season_data)
         refresh_all_roster_stats(season_data, lookup)
@@ -557,6 +638,9 @@ def admin_team_roster(team_id):
         reverse=True,
     )[:50]
     record = season_data.get("standings", {}).get(str(team_id), {})
+    game = get_game()
+    finances = team_finances(season_data, team_id, lookup)
+    is_user_team = game and int(game.get("team_id") or -1) == team_id
 
     return render_template(
         "admin/team_roster.html",
@@ -569,4 +653,7 @@ def admin_team_roster(team_id):
         free_agents=free_agents,
         record=f"{record.get('w', 0)}-{record.get('l', 0)}",
         roster_size=len(roster),
+        finances=finances,
+        is_user_team=is_user_team,
+        league_cap=get_salary_cap(season_data),
     )

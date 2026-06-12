@@ -221,6 +221,53 @@ class AdminTeamAssignmentTests(unittest.TestCase):
         self.assertNotIn(player_id, season_data["rosters"][str(team_id)])
         self.assertIsNone(lookup[player_id].get("team_id"))
 
+    def test_admin_set_team_salary_cap(self):
+        self._start_game_and_season()
+        with self.client.session_transaction() as sess:
+            season_id = sess.get("season_id")
+            user_team_id = sess.get("team_id")
+        season_data, _ = season_store.load_season(season_id)
+        team_id = int(user_team_id)
+
+        response = self.client.post(
+            f"/admin/teams/{team_id}",
+            data={"action": "set_cap", "salary_cap": "250"},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+
+        season_data, _ = season_store.load_season(season_id)
+        from contracts import get_salary_cap, team_finances
+
+        self.assertEqual(get_salary_cap(season_data, team_id), 250.0)
+        finances = team_finances(season_data, team_id)
+        self.assertEqual(finances["salary_cap"], 250.0)
+        self.assertGreater(finances["cap_space"], 0)
+
+    def test_admin_discount_roster_salaries(self):
+        self._start_game_and_season()
+        with self.client.session_transaction() as sess:
+            season_id = sess.get("season_id")
+        season_data, _ = season_store.load_season(season_id)
+        team_id = int(next(iter(season_data["rosters"])))
+        lookup = league_lookup(season_data)
+        player_id = season_data["rosters"][str(team_id)][0]
+        before = float(lookup[player_id]["salary"])
+
+        response = self.client.post(
+            f"/admin/teams/{team_id}",
+            data={"action": "discount_salaries", "salary_pct": "50"},
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+
+        season_data, _ = season_store.load_season(season_id)
+        lookup = league_lookup(season_data)
+        after = float(lookup[player_id]["salary"])
+        self.assertAlmostEqual(after, before * 0.5, places=1)
+
 
 class TeamPageRenderTests(unittest.TestCase):
     @classmethod

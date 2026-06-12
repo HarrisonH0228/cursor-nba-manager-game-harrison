@@ -15,15 +15,20 @@
         <th>Team</th>
         <th>Record</th>
         <th>Roster</th>
+        <th>Salary cap</th>
         <th></th>
       </tr>
     </thead>
     <tbody>
       {% for team in teams %}
       <tr>
-        <td style="font-weight:600;">{{ team.team_name }}</td>
+        <td style="font-weight:600;">
+          {{ team.team_name }}
+          {% if team.is_user_team %}<span class="badge-nba badge-nba-blue">Your Team</span>{% endif %}
+        </td>
         <td>{{ team.record }}</td>
         <td>{{ team.roster_size }} players</td>
+        <td>${{ team.salary_cap }}M{% if team.cap_override %} <span class="text-muted-nba" style="font-size:.75rem;">(custom)</span>{% endif %}</td>
         <td style="text-align:right;">
           <a href="{{ url_for('admin.admin_team_roster', team_id=team.team_id) }}" class="btn-nba-primary" style="padding:.35rem .75rem;font-size:.75rem;">Edit Roster</a>
         </td>

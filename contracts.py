@@ -16,6 +16,8 @@ TRADE_SALARY_TOLERANCE_M = 5.0
 
 ROOKIE_SALARY_BY_ROUND = {1: 8.0, 2: 3.5, 3: 1.5}
 CONTRACT_WARNING_YEARS = 1
+TEAM_SALARY_CAP_MIN_M = 50.0
+TEAM_SALARY_CAP_MAX_M = 500.0
 
 CHAMPIONSHIP_BONUS_BY_OVR = (
     (90, 2.0),
@@ -135,6 +137,63 @@ def assign_rookie_contract(player, draft_round=1):
     player["previous_team_id"] = player.get("team_id")
 
 
+def get_salary_cap(season, team_id=None):
+    """Return effective salary cap ($M) for a team, honoring admin overrides."""
+    overrides = season.get("salary_cap_overrides") or {}
+    if team_id is not None:
+        override = overrides.get(str(team_id))
+        if override is not None:
+            return float(override)
+    return float(season.get("salary_cap_m") or SALARY_CAP_M)
+
+
+def set_team_salary_cap(season, team_id, cap_m):
+    """Set a per-team salary cap override ($M)."""
+    cap_m = round(float(cap_m), 1)
+    if not TEAM_SALARY_CAP_MIN_M <= cap_m <= TEAM_SALARY_CAP_MAX_M:
+        raise ValueError(
+            f"Salary cap must be between ${TEAM_SALARY_CAP_MIN_M}M and ${TEAM_SALARY_CAP_MAX_M}M."
+        )
+    season.setdefault("salary_cap_overrides", {})[str(team_id)] = cap_m
+    return cap_m
+
+
+def clear_team_salary_cap(season, team_id):
+    """Remove a per-team salary cap override."""
+    overrides = season.get("salary_cap_overrides") or {}
+    overrides.pop(str(team_id), None)
+    if overrides:
+        season["salary_cap_overrides"] = overrides
+    else:
+        season.pop("salary_cap_overrides", None)
+
+
+def apply_roster_salary_multiplier(season, team_id, multiplier, lookup=None):
+    """Scale roster and two-way salaries for a team (e.g. 0.5 = half cost)."""
+    lookup = lookup or league_lookup(season)
+    multiplier = max(0.05, min(1.0, float(multiplier)))
+    updated = 0
+    players = list(roster_players(season, team_id, lookup))
+    try:
+        from roster import two_way_players
+
+        players.extend(two_way_players(season, team_id, lookup))
+    except ImportError:
+        pass
+    seen_ids = set()
+    for player in players:
+        player_id = player.get("id")
+        if player_id in seen_ids:
+            continue
+        seen_ids.add(player_id)
+        if player.get("salary") is None:
+            continue
+        player["salary"] = _round_salary(float(player["salary"]) * multiplier)
+        player["previous_salary"] = player["salary"]
+        updated += 1
+    return updated
+
+
 def team_payroll(season, team_id, lookup=None):
     lookup = lookup or league_lookup(season)
     total = 0.0
@@ -153,15 +212,18 @@ def team_payroll(season, team_id, lookup=None):
 def team_finances(season, team_id, lookup=None):
     lookup = lookup or league_lookup(season)
     payroll = team_payroll(season, team_id, lookup)
+    salary_cap = get_salary_cap(season, team_id)
     bonus_paid = float(
         season.get("team_finances", {}).get(str(team_id), {}).get("bonus_paid") or 0
     )
-    cap_space = round(SALARY_CAP_M - payroll, 1)
-    min_floor = round(SALARY_CAP_M * MIN_TEAM_SALARY_PCT, 1)
+    cap_space = round(salary_cap - payroll, 1)
+    min_floor = round(salary_cap * MIN_TEAM_SALARY_PCT, 1)
     return {
         "payroll": payroll,
         "cap_space": cap_space,
-        "salary_cap": SALARY_CAP_M,
+        "salary_cap": salary_cap,
+        "league_salary_cap": SALARY_CAP_M,
+        "cap_override": (season.get("salary_cap_overrides") or {}).get(str(team_id)),
         "luxury_tax_line": LUXURY_TAX_LINE_M,
         "min_team_salary": min_floor,
         "below_min_warning": payroll < min_floor,
@@ -202,11 +264,13 @@ def ensure_contract_fields(season, rng=None):
 def _normalize_team_payrolls(season, lookup):
     """Scale roster salaries so no team exceeds the hard cap."""
     for team_id_str in season.get("rosters", {}):
-        roster = roster_players(season, int(team_id_str), lookup)
+        team_id = int(team_id_str)
+        salary_cap = get_salary_cap(season, team_id)
+        roster = roster_players(season, team_id, lookup)
         payroll = sum(float(p.get("salary") or 0) for p in roster)
-        if payroll <= SALARY_CAP_M or payroll <= 0:
+        if payroll <= salary_cap or payroll <= 0:
             continue
-        scale = (SALARY_CAP_M * 0.92) / payroll
+        scale = (salary_cap * 0.92) / payroll
         for player in roster:
             player["salary"] = _round_salary(float(player.get("salary") or 0) * scale)
 
