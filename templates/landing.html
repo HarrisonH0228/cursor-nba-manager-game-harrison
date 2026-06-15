@@ -9,6 +9,7 @@
     </p>
     <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-4">
         <form method="post" action="{{ url_for('start') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <button type="submit" class="btn btn-primary btn-lg px-4 gap-3">Start Game</button>
         </form>
     </div>

@@ -100,6 +100,11 @@ def _pick_tradeable(season, pick):
     return season_year + 1 <= year <= season_year + FUTURE_PICK_YEARS
 
 
+def _team_in_season(season, team_id):
+    key = str(team_id)
+    return key in season.get("standings", {}) or key in season.get("rosters", {})
+
+
 def validate_trade(
     season,
     user_team_id,
@@ -114,6 +119,11 @@ def validate_trade(
 
     if user_team_id == partner_team_id:
         return False, "Cannot trade with yourself."
+
+    if not _team_in_season(season, user_team_id):
+        return False, "Your team is not in this season."
+    if not _team_in_season(season, partner_team_id):
+        return False, "Invalid trade partner."
 
     lookup = league_lookup(season)
     all_out = list(outgoing_players) + list(incoming_players)

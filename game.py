@@ -33,6 +33,10 @@ def get_season_id(current_session=None):
 
 def set_season_id(season_id, current_session=None):
     current_session = current_session if current_session is not None else session
+    if season_id is not None and not season_store.is_valid_season_id(season_id):
+        logger.warning("Rejected invalid season id in session: %r", season_id)
+        current_session.pop(SESSION_SEASON_ID, None)
+        return
     current_session[SESSION_SEASON_ID] = season_id
 
 
@@ -40,6 +44,10 @@ def load_session_season(current_session=None):
     current_session = current_session if current_session is not None else session
     season_id = get_season_id(current_session)
     if not season_id:
+        return None, None
+    if not season_store.is_valid_season_id(season_id):
+        logger.warning("Clearing invalid season id from session: %r", season_id)
+        current_session.pop(SESSION_SEASON_ID, None)
         return None, None
     season_data = season_store.load_season(season_id)
     if season_data is None:
@@ -71,7 +79,7 @@ def start_game(current_session=None):
 def clear_game(current_session=None):
     current_session = current_session if current_session is not None else session
     season_id = current_session.pop(SESSION_SEASON_ID, None)
-    if season_id:
+    if season_id and season_store.is_valid_season_id(season_id):
         season_store.delete_season(season_id)
     current_session.pop(SESSION_GAME_STARTED, None)
     current_session.pop(SESSION_TEAM_ID, None)

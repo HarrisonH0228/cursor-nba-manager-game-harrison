@@ -92,6 +92,23 @@ class OffseasonTests(unittest.TestCase):
         self.season["phase"] = "offseason"
         self.assertTrue(can_trade(self.season))
 
+    def test_invalid_trade_partner_rejected(self):
+        user_team = int(next(iter(self.season["rosters"])))
+        user_pick = self.season["draft_picks"][str(user_team)][0]["id"]
+        invalid_partner = 99999999
+
+        valid, message = validate_trade(
+            self.season,
+            user_team,
+            invalid_partner,
+            [],
+            [user_pick],
+            [],
+            [],
+        )
+        self.assertFalse(valid)
+        self.assertIn("Invalid trade partner", message)
+
     def test_trade_execution_moves_player_and_pick(self):
         lookup = league_lookup(self.season)
         user_team = int(next(iter(self.season["rosters"])))

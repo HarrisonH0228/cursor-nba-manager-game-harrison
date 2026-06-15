@@ -34,6 +34,7 @@
 
 {% if partner_id %}
 <form method="post" action="{{ url_for('trade_propose') }}" id="trade-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <input type="hidden" name="partner_id" value="{{ partner_id }}">
 
     <div class="card mb-4" id="trade-meter-card">
@@ -169,7 +170,10 @@
     function updateMeter() {
         fetch("{{ url_for('trade_evaluate') }}", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": document.querySelector('meta[name="csrf-token"]').getAttribute("content"),
+            },
             body: JSON.stringify({
                 partner_id: partnerId,
                 outgoing_players: selectedValues("outgoing_players"),

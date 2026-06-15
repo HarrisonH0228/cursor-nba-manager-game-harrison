@@ -9,7 +9,7 @@ import cache
 import custom_players
 import fetcher
 import season_store
-from errors import format_cache_timestamp
+from errors import format_cache_timestamp, read_json
 
 
 class ErrorHandlingTests(unittest.TestCase):
@@ -86,6 +86,47 @@ class ErrorHandlingTests(unittest.TestCase):
         formatted = format_cache_timestamp("2026-06-01T12:00:00Z")
         self.assertIn("2026", formatted)
         self.assertIn("UTC", formatted)
+
+    def test_invalid_season_id_rejected(self):
+        self.assertIsNone(season_store.load_season("not-a-uuid"))
+        self.assertIsNone(season_store.load_season("../etc/passwd"))
+        self.assertFalse(season_store.save_season("bad-id", {"season_year": 2026}))
+        self.assertFalse(season_store.delete_season("bad-id"))
+
+    def test_read_json_default_not_mutated(self):
+        default = {"players": []}
+        path = os.path.join(self._temp_dir, "missing.json")
+        data = read_json(path, default, "test default")
+        data["players"].append({"id": 1})
+        self.assertEqual(default["players"], [])
+        again = read_json(path, default, "test default")
+        self.assertEqual(again["players"], [])
+
+
+class AdminAuthTests(unittest.TestCase):
+    def setUp(self):
+        import app as app_module
+
+        self.app = app_module.app
+        self.app.config["WTF_CSRF_ENABLED"] = False
+        self.client = self.app.test_client()
+
+    def test_admin_panel_requires_login(self):
+        with self.client.session_transaction() as sess:
+            sess.pop("admin_authenticated", None)
+        response = self.client.get("/admin", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login", response.headers.get("Location", ""))
+
+    def test_admin_login_grants_access(self):
+        response = self.client.post(
+            "/admin/login",
+            data={"password": "1234"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as sess:
+            self.assertTrue(sess.get("admin_authenticated"))
 
 
 if __name__ == "__main__":

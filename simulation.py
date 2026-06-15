@@ -47,8 +47,7 @@ def _break_tie(home_box, away_box, rng):
     return _team_score(home_box), _team_score(away_box)
 
 
-def simulate_game_with_box_score(home_roster, away_roster, rng=None, home_team_gp=None, away_team_gp=None):
-    del home_team_gp, away_team_gp
+def simulate_game_with_box_score(home_roster, away_roster, rng=None):
     rng = rng or random.Random()
 
     away_pace = rng.gauss(1.0, PACE_STDEV)

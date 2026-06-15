@@ -79,6 +79,7 @@
                 <td class="text-end">
                     <form method="post" action="{{ url_for('team_release', player_id=player.id) }}" class="d-inline"
                           onsubmit="return confirm('Release {{ player.name }} to free agency?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <button type="submit" class="btn btn-sm btn-outline-danger">Release</button>
                     </form>
                 </td>

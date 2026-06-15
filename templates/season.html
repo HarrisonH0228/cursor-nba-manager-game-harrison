@@ -60,27 +60,32 @@
 
 {% if not season %}
 <form method="post" action="{{ url_for('season_start') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <button type="submit" class="btn btn-primary btn-lg">Start Season</button>
 </form>
 {% elif page == 'playoffs' %}
 {% if season.playoffs is none %}
 {% if regular_complete or season.phase == 'regular_complete' %}
 <form method="post" action="{{ url_for('season_playoffs') }}" class="mb-4">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <button type="submit" class="btn btn-primary">Start Playoffs</button>
 </form>
 {% else %}
 <div class="alert alert-info">Complete the regular season before starting playoffs.</div>
 <form method="post" action="{{ url_for('season_sim_full') }}" class="mb-4">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <button type="submit" class="btn btn-outline-primary">Sim Full Season First</button>
 </form>
 {% endif %}
 {% else %}
 <div class="d-flex flex-wrap gap-2 mb-4">
     <form method="post" action="{{ url_for('season_sim_playoffs') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="mode" value="round">
         <button type="submit" class="btn btn-primary" {% if season.phase == 'complete' %}disabled{% endif %}>Sim Round</button>
     </form>
     <form method="post" action="{{ url_for('season_sim_playoffs') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="mode" value="all">
         <button type="submit" class="btn btn-outline-primary" {% if season.phase == 'complete' %}disabled{% endif %}>Sim Playoffs</button>
     </form>
@@ -290,15 +295,19 @@
 {% elif page == 'schedule' %}
 <div class="d-flex flex-wrap gap-2 mb-4">
     <form method="post" action="{{ url_for('season_sim_day') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Day</button>
     </form>
     <form method="post" action="{{ url_for('season_sim_week') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-outline-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Week</button>
     </form>
     <form method="post" action="{{ url_for('season_sim_trade_deadline') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-outline-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim to Trade Deadline</button>
     </form>
     <form method="post" action="{{ url_for('season_sim_full') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-outline-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Full Season</button>
     </form>
 </div>
@@ -361,15 +370,19 @@
 {% else %}
 <div class="d-flex flex-wrap gap-2 mb-4">
     <form method="post" action="{{ url_for('season_sim_day') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Day</button>
     </form>
     <form method="post" action="{{ url_for('season_sim_week') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-outline-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Week</button>
     </form>
     <form method="post" action="{{ url_for('season_sim_trade_deadline') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-outline-primary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim to Trade Deadline</button>
     </form>
     <form method="post" action="{{ url_for('season_sim_full') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-outline-secondary" {% if season.phase != 'regular' %}disabled{% endif %}>Sim Full Season</button>
     </form>
 </div>
@@ -432,6 +445,7 @@
 <div class="mt-4 d-flex flex-wrap gap-2">
     <a href="{{ url_for('season_draft') }}" class="btn btn-outline-secondary">Draft Summary</a>
     <form method="post" action="{{ url_for('season_advance') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <button type="submit" class="btn btn-success">Advance to Next Season</button>
     </form>
 </div>

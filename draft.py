@@ -123,11 +123,12 @@ def _pick_in_round(pick_number, team_count):
 
 
 def _consume_pick_asset(season, team_id, pick_id=None, round_num=None):
+    del round_num
+    if not pick_id:
+        raise ValueError("pick_id is required to consume a draft pick")
     picks = season.get("draft_picks", {}).get(str(team_id), [])
     for index, pick in enumerate(picks):
-        if pick_id and pick.get("id") == pick_id:
-            return picks.pop(index)
-        if pick_id is None and round_num is not None and pick.get("round") == round_num:
+        if pick.get("id") == pick_id:
             return picks.pop(index)
     return None
 
@@ -172,7 +173,7 @@ def make_pick(season, team_id, prospect=None, rng=None, auto_trim=False):
     else:
         prospect = dict(prospect)
 
-    _consume_pick_asset(season, team_id, pick_id=slot.get("pick_id"), round_num=round_num)
+    _consume_pick_asset(season, team_id, pick_id=slot.get("pick_id"))
     _assign_rookie(season, prospect, team_id)
     if prospect.get("custom_id"):
         mark_custom_player_drafted(season, prospect["custom_id"])

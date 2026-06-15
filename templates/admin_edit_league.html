@@ -16,6 +16,7 @@
         <div class="card">
             <div class="card-body">
                 <form method="post" action="{{ url_for('admin_edit_league_player', player_id=player.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     {{ attribute_fields(attribute_keys, edit_player) }}
                     {{ career_fields(attribute_keys, player=player, career={
                         'peak_age': player.peak_age,

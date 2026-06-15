@@ -48,6 +48,7 @@
                 <td class="text-end">
                     <form method="post" action="{{ url_for('free_agency_sign', player_id=player.id) }}" class="d-inline"
                           onsubmit="return confirm('Sign {{ player.name }}?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <button type="submit" class="btn btn-sm btn-primary">Sign</button>
                     </form>
                 </td>

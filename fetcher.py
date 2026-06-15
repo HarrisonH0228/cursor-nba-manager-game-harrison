@@ -1,4 +1,5 @@
 import time
+import threading
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -16,6 +17,7 @@ logger = get_logger(__name__)
 
 CURRENT_SEASON = 2026
 REQUEST_DELAY = 0.6
+_refresh_lock = threading.Lock()
 
 
 def season_string(end_year: int) -> str:
@@ -130,77 +132,78 @@ def refresh_cache():
     """
     cache.ensure_cache_file()
 
-    try:
-        rows = _fetch_league_player_stats(CURRENT_SEASON)
-        if not rows:
-            raise ValueError("nba_api returned no player stats")
+    with _refresh_lock:
+        try:
+            rows = _fetch_league_player_stats(CURRENT_SEASON)
+            if not rows:
+                raise ValueError("nba_api returned no player stats")
 
-        team_lookup = _team_name_by_id()
-        position_lookup = _fetch_player_positions(CURRENT_SEASON)
-        skipped_rows = 0
-        records = []
-        for row in rows:
-            if (row.get("GP") or 0) <= 0:
-                continue
-            record = _player_record(row, team_lookup, position_lookup)
-            if record is None:
-                skipped_rows += 1
-                continue
-            records.append(record)
+            team_lookup = _team_name_by_id()
+            position_lookup = _fetch_player_positions(CURRENT_SEASON)
+            skipped_rows = 0
+            records = []
+            for row in rows:
+                if (row.get("GP") or 0) <= 0:
+                    continue
+                record = _player_record(row, team_lookup, position_lookup)
+                if record is None:
+                    skipped_rows += 1
+                    continue
+                records.append(record)
 
-        if skipped_rows:
-            logger.warning("Skipped %s malformed player stat rows", skipped_rows)
+            if skipped_rows:
+                logger.warning("Skipped %s malformed player stat rows", skipped_rows)
 
-        if not records:
-            raise ValueError("No players with games played in API response")
+            if not records:
+                raise ValueError("No players with games played in API response")
 
-        for player in records:
-            ensure_positions(player)
+            for player in records:
+                ensure_positions(player)
 
-        records = apply_ratings(records)
-        if not records:
-            raise ValueError("Ratings step produced no players")
+            records = apply_ratings(records)
+            if not records:
+                raise ValueError("Ratings step produced no players")
 
-        records = apply_attributes(records)
-        if not records:
-            raise ValueError("Attributes step produced no players")
+            records = apply_attributes(records)
+            if not records:
+                raise ValueError("Attributes step produced no players")
 
-        init_career_profiles(records)
+            init_career_profiles(records)
 
-        last_updated = (
-            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        )
-        cache.save_cache(
-            {
+            last_updated = (
+                datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            )
+            cache.save_cache(
+                {
+                    "last_updated": last_updated,
+                    "season": CURRENT_SEASON,
+                    "source": "nba_api",
+                    "players": records,
+                }
+            )
+            logger.info("Cache refreshed: %s players", len(records))
+            return {
+                "ok": True,
+                "used_cache": False,
                 "last_updated": last_updated,
-                "season": CURRENT_SEASON,
-                "source": "nba_api",
-                "players": records,
+                "error": None,
             }
-        )
-        logger.info("Cache refreshed: %s players", len(records))
-        return {
-            "ok": True,
-            "used_cache": False,
-            "last_updated": last_updated,
-            "error": None,
-        }
-    except Exception as exc:
-        logger.exception("refresh_cache failed")
-        existing = cache.load_cache()
-        if existing.get("players"):
+        except Exception as exc:
+            logger.exception("refresh_cache failed")
+            existing = cache.load_cache()
+            if existing.get("players"):
+                return {
+                    "ok": False,
+                    "used_cache": True,
+                    "last_updated": existing.get("last_updated"),
+                    "error": str(exc),
+                }
             return {
                 "ok": False,
-                "used_cache": True,
-                "last_updated": existing.get("last_updated"),
+                "used_cache": False,
+                "last_updated": None,
                 "error": str(exc),
             }
-        return {
-            "ok": False,
-            "used_cache": False,
-            "last_updated": None,
-            "error": str(exc),
-        }
 
 
 if __name__ == "__main__":

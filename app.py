@@ -1,10 +1,17 @@
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask_wtf.csrf import CSRFProtect
 
 import cache
-from errors import SeasonSaveError, configure_logging, format_cache_timestamp, get_logger
+from errors import (
+    CustomPlayersWriteError,
+    SeasonSaveError,
+    configure_logging,
+    format_cache_timestamp,
+    get_logger,
+)
 from fetcher import refresh_cache
 from game import (
     clear_game,
@@ -110,6 +117,8 @@ configure_logging()
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev")
 ADMIN_ENABLED = os.getenv("ADMIN_ENABLED", "true").lower() == "true"
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "1234")
+CSRFProtect(app)
 logger = get_logger(__name__)
 
 SORT_COLUMNS = {"name", "team", "overall", "ppg", "rpg", "apg", "spg", "bpg"}
@@ -237,8 +246,7 @@ def _parse_sort_order(default_sort, default_order, allowed_columns):
 
 
 def _load_players():
-    cache_data = cache.load_cache()
-    all_players = list(cache_data.get("players", []))
+    cache_data, all_players = cache.get_cached_players_payload()
 
     if needs_ratings(all_players):
         apply_ratings(all_players)
@@ -251,6 +259,12 @@ def _load_players():
         ensure_positions(player)
 
     return cache_data, all_players
+
+
+def _request_cache_data():
+    if "cache_data" not in g:
+        g.cache_data = cache.load_cache()
+    return g.cache_data
 
 
 def _season_player_lookup(season_data=None):
@@ -313,7 +327,7 @@ def _known_team_ids(all_players):
 
 @app.context_processor
 def inject_game():
-    cache_data = cache.load_cache()
+    cache_data = _request_cache_data()
     flash_result = session.pop("cache_flash", None)
     _, season_data = load_session_season()
     return {
@@ -322,6 +336,7 @@ def inject_game():
         "positions_label": positions_label,
         "max_roster": MAX_ROSTER,
         "admin_enabled": ADMIN_ENABLED,
+        "admin_authenticated": session.get("admin_authenticated"),
         "cache_status": _build_cache_status(flash_result, cache_data),
     }
 
@@ -355,9 +370,9 @@ def start():
     try:
         team = start_game()
     except RuntimeError as exc:
-        flash(str(exc))
+        flash(str(exc), "error")
         return redirect(url_for("index"))
-    flash(f"You are the GM of the {team['full_name']}!")
+    flash(f"You are the GM of the {team['full_name']}!", "success")
     return redirect(url_for("team"))
 
 
@@ -417,13 +432,13 @@ def team_release(player_id):
     game = get_game()
     season_id, season_data = load_session_season()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("team"))
 
     ok, message = release_player(season_data, game["team_id"], player_id)
     if ok and not _save_season(season_id, season_data):
         return redirect(url_for("team"))
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("team"))
 
 
@@ -436,7 +451,7 @@ def free_agency():
     game = get_game()
     season_id, season_data = load_session_season()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     sort_key, order = _parse_sort_order("overall", "desc", ROSTER_SORT_COLUMNS)
@@ -473,13 +488,13 @@ def free_agency_sign(player_id):
     game = get_game()
     season_id, season_data = load_session_season()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("free_agency"))
 
     ok, message = sign_free_agent(season_data, game["team_id"], player_id)
     if ok and not _save_season(season_id, season_data):
         return redirect(url_for("free_agency"))
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("free_agency"))
 
 
@@ -492,7 +507,7 @@ def trade():
     game = get_game()
     _, season_data = load_session_season()
     if season_data is None:
-        flash("Start a season first to trade.")
+        flash("Start a season first to trade.", "error")
         return redirect(url_for("season_hub"))
 
     partner_raw = request.args.get("partner", "").strip()
@@ -554,12 +569,12 @@ def trade_propose():
     game = get_game()
     season_id, season_data = load_session_season()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     partner_raw = request.form.get("partner_id", "").strip()
     if not partner_raw.isdigit():
-        flash("Select a trade partner.")
+        flash("Select a trade partner.", "error")
         return redirect(url_for("trade"))
 
     partner_id = int(partner_raw)
@@ -578,7 +593,7 @@ def trade_propose():
         incoming_picks,
     )
     if not valid:
-        flash(message)
+        flash(message, "success")
         return redirect(url_for("trade", partner=partner_id))
 
     if not cpu_accepts_trade(
@@ -590,7 +605,7 @@ def trade_propose():
         incoming_players,
         incoming_picks,
     ):
-        flash("Trade rejected — partner isn't getting enough value.")
+        flash("Trade rejected — partner isn't getting enough value.", "error")
         return redirect(url_for("trade", partner=partner_id))
 
     ok, message = execute_trade(
@@ -604,7 +619,7 @@ def trade_propose():
     )
     if ok and not _save_season(season_id, season_data):
         return redirect(url_for("trade", partner=partner_id))
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("trade", partner=partner_id))
 
 
@@ -841,7 +856,7 @@ def _save_season(season_id, season_data):
         return True
     except SeasonSaveError as exc:
         logger.exception("Season save failed")
-        flash(str(exc))
+        flash(str(exc), "error")
         return False
 
 
@@ -893,7 +908,7 @@ def season_start():
 
     cache_data, all_players, lookup, season_id, season_data = _season_context()
     if season_data is not None:
-        flash("Season already in progress.")
+        flash("Season already in progress.", "error")
         return redirect(url_for("season_hub"))
 
     season_id = season_store.create_season_id()
@@ -901,7 +916,7 @@ def season_start():
     set_season_id(season_id)
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_hub"))
-    flash("Season started.")
+    flash("Season started.", "success")
     return redirect(url_for("season_hub"))
 
 
@@ -913,13 +928,13 @@ def season_sim_full():
 
     _, all_players, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     count = sim_rest_of_season(season_data, lookup)
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_hub"))
-    flash(f"Simulated {count} games. Regular season complete.")
+    flash(f"Simulated {count} games. Regular season complete.", "success")
     return redirect(url_for("season_hub"))
 
 
@@ -932,7 +947,7 @@ def season_schedule():
     game = get_game()
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     day_raw = request.args.get("day", "").strip()
@@ -941,7 +956,7 @@ def season_schedule():
     if day_raw:
         day_value, err = _require_int(day_raw, "Day", minimum=1, maximum=max_day)
         if err:
-            flash(err)
+            flash(err, "error")
         else:
             schedule_day = day_value
 
@@ -964,12 +979,12 @@ def season_game_box_score(game_id):
     game_state = get_game()
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     schedule_game = find_schedule_game(season_data, game_id)
     if schedule_game is None or not schedule_game.get("played"):
-        flash("Box score not available for that game.")
+        flash("Box score not available for that game.", "error")
         return redirect(url_for("season_schedule"))
 
     return render_template(
@@ -990,13 +1005,13 @@ def season_sim_day():
 
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     count = sim_day(season_data, lookup)
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_hub"))
-    flash(f"Simulated day {season_data.get('current_day', 1) - 1}: {count} games.")
+    flash(f"Simulated day {season_data.get('current_day', 1) - 1}: {count} games.", "success")
     return redirect(url_for("season_hub"))
 
 
@@ -1008,13 +1023,13 @@ def season_sim_week():
 
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     count = sim_week(season_data, lookup)
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_hub"))
-    flash(f"Simulated one week: {count} games.")
+    flash(f"Simulated one week: {count} games.", "success")
     return redirect(url_for("season_hub"))
 
 
@@ -1026,13 +1041,13 @@ def season_sim_trade_deadline():
 
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     count = sim_to_trade_deadline(season_data, lookup)
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_hub"))
-    flash(f"Simulated to trade deadline (~55 GP): {count} games.")
+    flash(f"Simulated to trade deadline (~55 GP): {count} games.", "success")
     return redirect(url_for("season_hub"))
 
 
@@ -1045,7 +1060,7 @@ def season_playoffs():
     game = get_game()
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     if request.method == "POST" and season_data.get("playoffs") is None:
@@ -1054,7 +1069,7 @@ def season_playoffs():
         seed_playoffs(season_data, lookup)
         if not _save_season(season_id, season_data):
             return redirect(url_for("season_playoffs"))
-        flash("Playoffs seeded.")
+        flash("Playoffs seeded.", "success")
         return redirect(url_for("season_playoffs"))
 
     east_standings = standings_table(season_data, conference="East")
@@ -1086,7 +1101,7 @@ def season_sim_playoffs():
     sim_mode = request.form.get("mode", "round")
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None or season_data.get("playoffs") is None:
-        flash("Start playoffs first.")
+        flash("Start playoffs first.", "error")
         return redirect(url_for("season_playoffs"))
 
     if sim_mode == "all":
@@ -1094,10 +1109,10 @@ def season_sim_playoffs():
         message = "Playoffs complete."
         if season_data.get("playoffs", {}).get("champion_name"):
             message = f"Champion: {season_data['playoffs']['champion_name']}"
-        flash(message)
+        flash(message, "success")
     else:
         count = advance_playoff_round(season_data, lookup)
-        flash(f"Simulated playoff round: {count} series finished.")
+        flash(f"Simulated playoff round: {count} series finished.", "success")
 
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_playoffs"))
@@ -1113,7 +1128,7 @@ def season_draft():
     game = get_game()
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     phase = season_data.get("phase")
@@ -1129,7 +1144,7 @@ def season_draft():
         )
 
     if phase not in {"draft", "offseason"}:
-        flash("Draft is not available yet.")
+        flash("Draft is not available yet.", "error")
         return redirect(url_for("season_hub"))
 
     board = draft_board_context(season_data, game["team_id"], lookup)
@@ -1154,17 +1169,17 @@ def season_draft_start():
 
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     if season_data.get("phase") != "complete":
-        flash("Draft can only start after playoffs.")
+        flash("Draft can only start after playoffs.", "error")
         return redirect(url_for("season_draft"))
 
     start_draft(season_data, lookup)
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_draft"))
-    flash("Draft started.")
+    flash("Draft started.", "success")
     return redirect(url_for("season_draft"))
 
 
@@ -1177,7 +1192,7 @@ def season_draft_pick():
     game = get_game()
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None or season_data.get("phase") != "draft":
-        flash("No draft in progress.")
+        flash("No draft in progress.", "error")
         return redirect(url_for("season_draft"))
 
     option_raw = request.form.get("prospect_index", "0").strip()
@@ -1185,14 +1200,14 @@ def season_draft_pick():
     state = season_data.get("draft_state") or {}
     options = state.get("prospect_options", [])
     if err or option_index is None or option_index >= len(options) or not options:
-        flash("Select a valid prospect.")
+        flash("Select a valid prospect.", "error")
         return redirect(url_for("season_draft"))
     prospect = options[option_index]
 
     ok, message = make_pick(season_data, game["team_id"], prospect=prospect)
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_draft"))
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("season_draft"))
 
 
@@ -1206,7 +1221,7 @@ def season_draft_sim():
     sim_mode = request.form.get("mode", "to_user")
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None or season_data.get("phase") != "draft":
-        flash("No draft in progress.")
+        flash("No draft in progress.", "error")
         return redirect(url_for("season_draft"))
 
     if sim_mode == "rest":
@@ -1218,7 +1233,7 @@ def season_draft_sim():
 
     if not _save_season(season_id, season_data):
         return redirect(url_for("season_draft"))
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("season_draft"))
 
 
@@ -1230,11 +1245,11 @@ def season_advance():
 
     _, _, lookup, season_id, season_data = _season_context()
     if season_data is None:
-        flash("Start a season first.")
+        flash("Start a season first.", "error")
         return redirect(url_for("season_hub"))
 
     if season_data.get("phase") != "offseason":
-        flash("Complete the draft before advancing.")
+        flash("Complete the draft before advancing.", "error")
         return redirect(url_for("season_draft"))
 
     advance_season(season_data)
@@ -1247,19 +1262,26 @@ def season_advance():
         if len(retirements) > 8:
             names += f", +{len(retirements) - 8} more"
         message = f"{message} Retired: {names}."
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("season_hub"))
 
 
-def _admin_guard():
+def _admin_guard(*, require_auth=True):
     if not ADMIN_ENABLED:
-        flash("Admin panel is disabled.")
+        flash("Admin panel is disabled.", "error")
         return redirect(url_for("index"))
+    if require_auth and not session.get("admin_authenticated"):
+        flash("Admin login required.", "error")
+        return redirect(url_for("admin_login"))
     return None
 
 
 def _admin_player_form_data(form):
     overclock = form.get("overclock") == "on"
+    try:
+        career = parse_career_from_form(form, overclocked=overclock)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
     return {
         "name": form.get("name", ""),
         "age": form.get("age", 19),
@@ -1267,7 +1289,7 @@ def _admin_player_form_data(form):
         "attributes": {key: form.get(key) for key in ATTRIBUTE_KEYS},
         "potential": form.get("potential") or None,
         "overclock": overclock,
-        "career": parse_career_from_form(form, overclocked=overclock),
+        "career": career,
     }
 
 
@@ -1275,6 +1297,30 @@ def _admin_season_context():
     _, _, lookup, season_id, season_data = _season_context()
     teams = list_season_teams(season_data) if season_data else []
     return season_id, season_data, lookup, teams
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if not ADMIN_ENABLED:
+        flash("Admin panel is disabled.", "error")
+        return redirect(url_for("index"))
+    if session.get("admin_authenticated"):
+        return redirect(url_for("admin_panel"))
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if password == ADMIN_PASSWORD:
+            session["admin_authenticated"] = True
+            flash("Admin access granted.", "success")
+            return redirect(url_for("admin_panel"))
+        flash("Incorrect password.", "error")
+    return render_template("admin_login.html", page_title="Admin Login")
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    session.pop("admin_authenticated", None)
+    flash("Logged out of admin.", "success")
+    return redirect(url_for("index"))
 
 
 @app.route("/admin")
@@ -1302,13 +1348,21 @@ def admin_add_player():
     if blocked is not None:
         return blocked
 
-    form_data = _admin_player_form_data(request.form)
+    try:
+        form_data = _admin_player_form_data(request.form)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin_panel"))
+
     assign_team_id = request.form.get("assign_team_id", "").strip()
 
     try:
         entry = add_custom_player(**form_data)
     except ValueError as exc:
-        flash(str(exc))
+        flash(str(exc), "error")
+        return redirect(url_for("admin_panel"))
+    except CustomPlayersWriteError as exc:
+        flash(str(exc), "error")
         return redirect(url_for("admin_panel"))
 
     message = "Custom player added to the draft pool."
@@ -1329,7 +1383,7 @@ def admin_add_player():
         else:
             message = f"{message} Start a season to assign players to teams."
 
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("admin_panel"))
 
 
@@ -1341,20 +1395,27 @@ def admin_edit_custom_player(custom_id):
 
     player = get_custom_player(custom_id)
     if not player:
-        flash("Custom player not found.")
+        flash("Custom player not found.", "error")
         return redirect(url_for("admin_panel"))
 
     if request.method == "POST":
-        form_data = _admin_player_form_data(request.form)
+        try:
+            form_data = _admin_player_form_data(request.form)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("admin_edit_custom_player", custom_id=custom_id))
         try:
             updated = update_custom_player(custom_id, **form_data)
         except ValueError as exc:
-            flash(str(exc))
+            flash(str(exc), "error")
+            return redirect(url_for("admin_edit_custom_player", custom_id=custom_id))
+        except CustomPlayersWriteError as exc:
+            flash(str(exc), "error")
             return redirect(url_for("admin_edit_custom_player", custom_id=custom_id))
         if updated:
-            flash(f"Updated {updated['name']}.")
+            flash(f"Updated {updated['name']}.", "success")
         else:
-            flash("Custom player not found.")
+            flash("Custom player not found.", "error")
         return redirect(url_for("admin_panel"))
 
     return render_template(
@@ -1372,10 +1433,13 @@ def admin_delete_player(custom_id):
     if blocked is not None:
         return blocked
 
-    if delete_custom_player(custom_id):
-        flash("Custom player removed.")
-    else:
-        flash("Custom player not found.")
+    try:
+        if delete_custom_player(custom_id):
+            flash("Custom player removed.", "success")
+        else:
+            flash("Custom player not found.", "error")
+    except CustomPlayersWriteError as exc:
+        flash(str(exc), "error")
     return redirect(url_for("admin_panel"))
 
 
@@ -1423,19 +1487,19 @@ def admin_roster_assign_custom():
 
     season_id, season_data, _, _ = _admin_season_context()
     if not season_data:
-        flash("No active season.")
+        flash("No active season.", "error")
         return redirect(url_for("admin_rosters"))
 
     team_id = request.form.get("team_id", "").strip()
     custom_id = request.form.get("custom_id", "").strip()
     if not team_id.isdigit() or not custom_id:
-        flash("Team and custom player are required.")
+        flash("Team and custom player are required.", "error")
         return redirect(url_for("admin_rosters", team_id=team_id or None))
 
     ok, _, message = admin_place_custom_on_team(season_data, custom_id, int(team_id))
     if ok and not _save_season(season_id, season_data):
         return redirect(url_for("admin_rosters", team_id=team_id))
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("admin_rosters", team_id=team_id))
 
 
@@ -1447,19 +1511,19 @@ def admin_roster_release():
 
     season_id, season_data, _, _ = _admin_season_context()
     if not season_data:
-        flash("No active season.")
+        flash("No active season.", "error")
         return redirect(url_for("admin_rosters"))
 
     team_id = request.form.get("team_id", "").strip()
     player_id = request.form.get("player_id", "").strip()
     if not team_id.isdigit() or not player_id.isdigit():
-        flash("Invalid release request.")
+        flash("Invalid release request.", "error")
         return redirect(url_for("admin_rosters", team_id=team_id or None))
 
     ok, message = admin_release_player(season_data, int(team_id), int(player_id))
     if ok and not _save_season(season_id, season_data):
         return redirect(url_for("admin_rosters", team_id=team_id))
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("admin_rosters", team_id=team_id))
 
 
@@ -1471,14 +1535,14 @@ def admin_roster_move():
 
     season_id, season_data, _, _ = _admin_season_context()
     if not season_data:
-        flash("No active season.")
+        flash("No active season.", "error")
         return redirect(url_for("admin_rosters"))
 
     player_id = request.form.get("player_id", "").strip()
     dest_team_id = request.form.get("dest_team_id", "").strip()
     source_team_id = request.form.get("source_team_id", "").strip()
     if not player_id.isdigit() or not dest_team_id.isdigit():
-        flash("Invalid move request.")
+        flash("Invalid move request.", "error")
         return redirect(url_for("admin_rosters", team_id=source_team_id or None))
 
     ok, message = admin_move_player(season_data, int(player_id), int(dest_team_id))
@@ -1486,7 +1550,7 @@ def admin_roster_move():
         if not _save_season(season_id, season_data):
             return redirect(url_for("admin_rosters", team_id=source_team_id or dest_team_id))
         source_team_id = dest_team_id
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("admin_rosters", team_id=source_team_id or dest_team_id))
 
 
@@ -1498,19 +1562,19 @@ def admin_roster_sign_fa():
 
     season_id, season_data, _, _ = _admin_season_context()
     if not season_data:
-        flash("No active season.")
+        flash("No active season.", "error")
         return redirect(url_for("admin_rosters"))
 
     team_id = request.form.get("team_id", "").strip()
     player_id = request.form.get("player_id", "").strip()
     if not team_id.isdigit() or not player_id.isdigit():
-        flash("Invalid signing request.")
+        flash("Invalid signing request.", "error")
         return redirect(url_for("admin_rosters", team_id=team_id or None))
 
     ok, message = admin_sign_free_agent(season_data, int(team_id), int(player_id))
     if ok and not _save_season(season_id, season_data):
         return redirect(url_for("admin_rosters", team_id=team_id))
-    flash(message)
+    flash(message, "success")
     return redirect(url_for("admin_rosters", team_id=team_id))
 
 
@@ -1522,12 +1586,12 @@ def admin_edit_league_player(player_id):
 
     season_id, season_data, lookup, _ = _admin_season_context()
     if not season_data:
-        flash("No active season.")
+        flash("No active season.", "error")
         return redirect(url_for("admin_rosters"))
 
     player = lookup.get(player_id)
     if not player:
-        flash("Player not found.")
+        flash("Player not found.", "error")
         return redirect(url_for("admin_rosters"))
 
     init_career_profile(player)
@@ -1538,7 +1602,7 @@ def admin_edit_league_player(player_id):
             career = parse_career_from_form(request.form, overclocked=overclock)
             attributes = parse_attributes_from_form(request.form, overclocked=overclock)
         except ValueError as exc:
-            flash(str(exc))
+            flash(str(exc), "error")
             return redirect(url_for("admin_edit_league_player", player_id=player_id))
         ok, message = admin_update_league_player(
             season_data,
@@ -1549,7 +1613,7 @@ def admin_edit_league_player(player_id):
         if ok:
             if not _save_season(season_id, season_data):
                 return redirect(url_for("admin_edit_league_player", player_id=player_id))
-        flash(message)
+        flash(message, "success")
         return redirect(url_for("admin_rosters", team_id=player.get("team_id")))
 
     edit_player = dict(player)
@@ -1564,7 +1628,7 @@ def admin_edit_league_player(player_id):
     )
 
 
-@app.route("/refresh")
+@app.route("/refresh", methods=["POST"])
 def refresh():
     result = refresh_cache()
     session["cache_flash"] = result
@@ -1604,4 +1668,4 @@ if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=os.getenv("FLASK_DEBUG", "0") == "1")

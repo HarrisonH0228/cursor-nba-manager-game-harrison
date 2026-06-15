@@ -1,8 +1,10 @@
 """Shared logging and JSON I/O helpers."""
 
+import copy
 import json
 import logging
 import os
+from contextlib import contextmanager
 from datetime import datetime
 
 _LOG_CONFIGURED = False
@@ -36,23 +38,54 @@ def get_logger(name):
     return logging.getLogger(name)
 
 
+def _copy_default(default):
+    if isinstance(default, dict):
+        return copy.deepcopy(default)
+    return default
+
+
+@contextmanager
+def _file_lock(path):
+    lock_path = path + ".lock"
+    directory = os.path.dirname(lock_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    lock_handle = open(lock_path, "a+", encoding="utf-8")
+    try:
+        try:
+            import fcntl
+
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass
+        yield
+    finally:
+        try:
+            import fcntl
+
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        except (ImportError, OSError):
+            pass
+        lock_handle.close()
+
+
 def read_json(path, default, label):
     logger = get_logger(__name__)
     if not os.path.exists(path):
-        return dict(default) if isinstance(default, dict) else default
+        return _copy_default(default)
 
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
     except json.JSONDecodeError:
         logger.exception("%s JSON decode failed: %s", label, path)
-        return dict(default) if isinstance(default, dict) else default
+        return _copy_default(default)
     except OSError:
         logger.exception("%s read failed: %s", label, path)
-        return dict(default) if isinstance(default, dict) else default
+        return _copy_default(default)
 
     if data is None:
-        return dict(default) if isinstance(default, dict) else default
+        return _copy_default(default)
     return data
 
 
@@ -63,9 +96,10 @@ def write_json(path, data, label):
         os.makedirs(directory, exist_ok=True)
     temp_path = path + ".tmp"
     try:
-        with open(temp_path, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2)
-        os.replace(temp_path, path)
+        with _file_lock(path):
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, indent=2)
+            os.replace(temp_path, path)
         return True
     except OSError:
         logger.exception("%s write failed: %s", label, path)

@@ -21,6 +21,7 @@
     Picks 15–30 follow playoff finish order.
 </div>
 <form method="post" action="{{ url_for('season_draft_start') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <button type="submit" class="btn btn-primary btn-lg">Start Draft</button>
 </form>
 
@@ -29,6 +30,7 @@
     Draft complete. Advance to the next season when you're ready.
 </div>
 <form method="post" action="{{ url_for('season_advance') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
     <button type="submit" class="btn btn-success btn-lg">Advance to Next Season</button>
 </form>
 
@@ -57,6 +59,7 @@
     </div>
     <div class="card-body">
         <form method="post" action="{{ url_for('season_draft_pick') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <div class="row g-3 mb-3">
                 {% for prospect in board.prospect_options %}
                 <div class="col-md-6">
@@ -91,10 +94,12 @@
 {% else %}
 <div class="d-flex flex-wrap gap-2 mb-4">
     <form method="post" action="{{ url_for('season_draft_sim') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="mode" value="to_user">
         <button type="submit" class="btn btn-primary">Sim to My Pick</button>
     </form>
     <form method="post" action="{{ url_for('season_draft_sim') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <input type="hidden" name="mode" value="rest">
         <button type="submit" class="btn btn-outline-primary">Sim Rest of Draft</button>
     </form>

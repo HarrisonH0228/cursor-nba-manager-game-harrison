@@ -16,7 +16,10 @@
         <p class="text-muted mb-0">Last updated: {{ last_updated }}</p>
         {% endif %}
     </div>
-    <a href="{{ url_for('refresh') }}" class="btn btn-outline-primary">Refresh Data</a>
+    <form method="post" action="{{ url_for('refresh') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <button type="submit" class="btn btn-outline-primary">Refresh Data</button>
+    </form>
 </div>
 
 <form method="get" action="{{ url_for('search') }}" class="row g-2 mb-4">

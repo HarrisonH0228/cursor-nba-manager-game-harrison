@@ -9,6 +9,10 @@
             Manage custom draft prospects, career profiles, and league rosters.
         </p>
     </div>
+    <form method="post" action="{{ url_for('admin_logout') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <button type="submit" class="btn btn-outline-secondary btn-sm">Log out</button>
+    </form>
 </div>
 
 <ul class="nav nav-tabs mb-4">
@@ -28,6 +32,7 @@
             </div>
             <div class="card-body">
                 <form method="post" action="{{ url_for('admin_add_player') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     {{ player_basics(valid_positions) }}
                     {{ attribute_fields(attribute_keys) }}
                     {{ career_fields(attribute_keys) }}
@@ -98,6 +103,7 @@
                                 <form method="post" class="d-inline"
                                       action="{{ url_for('admin_delete_player', custom_id=player.custom_id) }}"
                                       onsubmit="return confirm('Remove {{ player.name }} from the draft pool?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
                                 </form>
                             </td>

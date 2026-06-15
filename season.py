@@ -694,14 +694,10 @@ def _record_result(season, game, result):
 def _play_game(season, game, lookup, rng):
     home_roster = roster_players(season, game["home_id"], lookup)
     away_roster = roster_players(season, game["away_id"], lookup)
-    home_gp = season["standings"][str(game["home_id"])].get("gp", 0)
-    away_gp = season["standings"][str(game["away_id"])].get("gp", 0)
     result = simulate_game_with_box_score(
         home_roster,
         away_roster,
         rng,
-        home_team_gp=home_gp,
-        away_team_gp=away_gp,
     )
     _record_result(season, game, result)
     return game

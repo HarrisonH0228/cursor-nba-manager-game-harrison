@@ -55,6 +55,7 @@
             <div class="card-body">
                 {% if custom_players %}
                 <form method="post" action="{{ url_for('admin_roster_assign_custom') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="team_id" value="{{ selected_team_id }}">
                     <select class="form-select mb-3" name="custom_id" required>
                         <option value="">Choose player…</option>
@@ -77,6 +78,7 @@
             <div class="card-body">
                 {% if free_agents %}
                 <form method="post" action="{{ url_for('admin_roster_sign_fa') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <input type="hidden" name="team_id" value="{{ selected_team_id }}">
                     <select class="form-select mb-3" name="player_id" required>
                         <option value="">Choose free agent…</option>
@@ -132,6 +134,7 @@
                                     <form method="post" class="d-inline"
                                           action="{{ url_for('admin_roster_move') }}"
                                           onsubmit="return confirm('Move {{ player.name }}?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <input type="hidden" name="player_id" value="{{ player.id }}">
                                         <input type="hidden" name="source_team_id" value="{{ selected_team_id }}">
                                         <select class="form-select form-select-sm d-inline-block" style="width: auto"
@@ -145,6 +148,7 @@
                                     <form method="post" class="d-inline"
                                           action="{{ url_for('admin_roster_release') }}"
                                           onsubmit="return confirm('Release {{ player.name }} to free agency?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                         <input type="hidden" name="team_id" value="{{ selected_team_id }}">
                                         <input type="hidden" name="player_id" value="{{ player.id }}">
                                         <button type="submit" class="btn btn-outline-danger btn-sm">Release</button>
